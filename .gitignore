@@ -8,3 +8,6 @@ apps/app/.expo/
 apps/app/dist/
 apps/app/web-build/
 packages/shared/dist/
+
+# npm 캐시(EACCES 우회용 로컬 캐시)
+.npm-cache/

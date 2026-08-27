@@ -1,0 +1,24 @@
+{
+  "name": "dimolvision",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "디몰비전 (DimolVision) — 철거 현장 사진 AI 분석(경량형: 호스팅 VLM). 디몰링크에서 분리한 독립 제품.",
+  "workspaces": ["apps/*", "packages/*"],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build:shared": "npm run build -w @dimol/shared",
+    "build": "npm run build:shared && npm run build --workspaces --if-present",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present",
+    "format": "prettier --write .",
+    "api:dev": "npm run dev -w @dimolvision/api",
+    "app:start": "npm run start -w @dimolvision/app"
+  },
+  "devDependencies": {
+    "prettier": "^3.4.2",
+    "typescript": "^5.7.2"
+  }
+}

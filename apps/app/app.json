@@ -1,0 +1,59 @@
+{
+  "expo": {
+    "name": "디몰비전",
+    "slug": "dimolvision",
+    "version": "1.0.0",
+    "sdkVersion": "52.0.0",
+    "scheme": "dimolvision",
+    "description": "철거 현장 사진 한 장으로 소재·철거 공정·위험요소를 분석하는 AI.",
+    "platforms": ["ios", "android", "web"],
+    "icon": "./assets/icon.png",
+    "splash": {
+      "image": "./assets/splash.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#FFFFFF"
+    },
+    "ios": {
+      "bundleIdentifier": "com.dimolvision.app",
+      "supportsTablet": false,
+      "infoPlist": {
+        "NSCameraUsageDescription": "현장 사진 분석 기능에 사용됩니다.",
+        "NSPhotoLibraryUsageDescription": "현장 사진 업로드에 사용됩니다.",
+        "NSMotionUsageDescription": "가이드 촬영에서 촬영 방향을 안내하는 데 사용됩니다."
+      }
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#FFFFFF"
+      },
+      "package": "com.dimolvision.app",
+      "permissions": ["CAMERA", "READ_EXTERNAL_STORAGE"]
+    },
+    "web": {
+      "bundler": "metro",
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      "expo-asset",
+      "expo-font",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "현장 사진 업로드에 사용됩니다.",
+          "cameraPermission": "현장 사진 촬영에 사용됩니다."
+        }
+      ],
+      [
+        "expo-build-properties",
+        {
+          "android": { "kotlinVersion": "1.9.25" }
+        }
+      ],
+      [
+        "expo-camera",
+        { "cameraPermission": "현장 사진 촬영에 사용됩니다." }
+      ]
+    ]
+  }
+}

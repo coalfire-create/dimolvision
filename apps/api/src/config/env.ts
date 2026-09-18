@@ -23,7 +23,7 @@ export const env = {
     groqApiKey: process.env.GROQ_API_KEY,
     groqModel: process.env.GROQ_MODEL ?? 'qwen/qwen3.8-27b',
     geminiApiKey: process.env.GEMINI_API_KEY,
-    geminiModel: process.env.GEMINI_MODEL ?? 'gemini-2.0-flash',
+    geminiModel: process.env.GEMINI_MODEL ?? 'gemini-2.5-flash',
     anthropicApiKey: process.env.ANTHROPIC_API_KEY,
     anthropicModel: process.env.ANTHROPIC_MODEL ?? 'claude-sonnet-4-6',
     visionTimeoutMs: Number(process.env.VISION_TIMEOUT_MS ?? 30_000),

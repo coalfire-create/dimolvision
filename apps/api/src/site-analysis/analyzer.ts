@@ -222,7 +222,9 @@ export class GeminiSiteAnalyzer implements SiteAnalyzer {
                 ],
               },
             ],
-            generationConfig: { maxOutputTokens: 1500, responseMimeType: 'application/json' },
+            // gemini-2.5 계열은 사고(thinking) 토큰을 먼저 소비한다. 1500 이면 사고만 하다
+            // 본문이 비어 파싱이 실패하므로 리포트 길이에 여유를 둔다.
+            generationConfig: { maxOutputTokens: 4000, responseMimeType: 'application/json' },
           }),
         },
       );

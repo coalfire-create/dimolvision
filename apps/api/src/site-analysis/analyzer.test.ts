@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   ClaudeSiteAnalyzer,
   MockSiteAnalyzer,
+  GeminiSiteAnalyzer,
   GROQ_MAX_IMAGES,
   GroqSiteAnalyzer,
   SelfHostedVlmAnalyzer,
@@ -243,5 +244,38 @@ describe('GroqSiteAnalyzer 이미지 한도', () => {
       (c: { type: string }) => c.type === 'image_url',
     );
     expect(imageBlocks).toHaveLength(GROQ_MAX_IMAGES);
+  });
+});
+
+describe('GeminiSiteAnalyzer 생성 설정', () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('사고(thinking)를 끄고 잘림 없는 토큰 예산을 보낸다', async () => {
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      json: async () => ({
+        candidates: [
+          {
+            content: {
+              parts: [
+                {
+                  text: '{"summary":"현장","materials":[],"demolitionSteps":[],"hazards":[],"confidence":"LOW"}',
+                },
+              ],
+            },
+          },
+        ],
+      }),
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const analyzer = new GeminiSiteAnalyzer({ apiKey: 'k', model: 'gemini-2.5-flash', timeoutMs: 5000 });
+    const r = await analyzer.analyze({ imageBase64: IMG, mimeType: 'image/jpeg' });
+    expect(r.method).toBe('AI_VISION');
+
+    const body = JSON.parse(fetchMock.mock.calls[0]?.[1]?.body as string);
+    expect(body.generationConfig.thinkingConfig.thinkingBudget).toBe(0);
+    expect(body.generationConfig.maxOutputTokens).toBeGreaterThanOrEqual(8000);
+    expect(body.generationConfig.responseMimeType).toBe('application/json');
   });
 });

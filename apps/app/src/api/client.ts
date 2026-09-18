@@ -1,5 +1,5 @@
 import { Platform } from 'react-native';
-import type { SiteAnalysis, WasteItem } from '@dimol/shared';
+import type { BuildingStructure, SiteAnalysis, VolumeEstimate, WasteItem } from '@dimol/shared';
 
 /**
  * 디몰비전 API 클라이언트(경량형). 디몰링크 본체 클라이언트에서 현장 분석 호출만 분리했다.
@@ -57,6 +57,8 @@ export const analyzeSite = (input: {
 export interface PhotoWasteItemsResult {
   analysis: SiteAnalysis;
   wasteItems: WasteItem[];
+  /** 연면적을 함께 보냈을 때만 온다 — 추정 톤수·범위·트럭 대수. */
+  estimate?: VolumeEstimate;
 }
 
 export const analyzeSiteWasteItems = (input: {
@@ -64,6 +66,8 @@ export const analyzeSiteWasteItems = (input: {
   mimeType?: string;
   images?: AnalyzeImage[];
   floorAreaM2?: number;
+  floors?: number;
+  structure?: BuildingStructure;
   buildingStructure?: string;
 }) =>
   api<PhotoWasteItemsResult>('/site-analysis/waste-items', {

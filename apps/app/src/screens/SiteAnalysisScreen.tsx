@@ -1,12 +1,16 @@
 import React, { useEffect, useState } from 'react';
-import { ActivityIndicator, Image, Linking, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Image, Linking, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import {
+  BUILDING_STRUCTURE_LABELS,
   MATERIAL_CATEGORY_LABELS,
+  pyeongToM2,
+  type BuildingStructure,
   type DetectedMaterial,
   type SiteAnalysis,
+  type VolumeEstimate,
 } from '@dimol/shared';
-import { ApiError, analyzeSite } from '../api/client';
+import { ApiError, analyzeSite, analyzeSiteWasteItems } from '../api/client';
 import { AppIcon } from '../components/AppIcon';
 import { CameraCaptureModal, type CapturedPhoto } from '../components/CameraCaptureModal';
 import { AppButton, Card, ErrorBanner, StickyFooter } from '../components/ui';
@@ -82,6 +86,10 @@ export function SiteAnalysisScreen() {
   const [cameraOpen, setCameraOpen] = useState(false);
   /** 분석 중인 샘플 id(썸네일에 스피너 표시용). */
   const [sampleId, setSampleId] = useState<string | null>(null);
+  /** 선택 입력 — 연면적(평)과 주구조. 넣으면 물량 추정이 붙는다. */
+  const [pyeong, setPyeong] = useState('');
+  const [structure, setStructure] = useState<BuildingStructure | null>(null);
+  const [estimate, setEstimate] = useState<VolumeEstimate | null>(null);
 
   function applyAsset(asset: ImagePicker.ImagePickerAsset) {
     if (!asset.base64) {
@@ -117,12 +125,39 @@ export function SiteAnalysisScreen() {
     setCameraOpen(true);
   }
 
+  /** 입력된 평수를 ㎡ 로. 비었거나 숫자가 아니면 undefined(물량 추정 생략). */
+  function floorAreaM2(): number | undefined {
+    const v = Number(pyeong);
+    return Number.isFinite(v) && v > 0 ? pyeongToM2(v) : undefined;
+  }
+
+  /**
+   * 사진만 있으면 소재·공정만, 연면적까지 있으면 물량 추정(톤·트럭 대수)까지 한 번에.
+   * 면적은 선택 입력이라 없어도 체험이 막히지 않는다.
+   */
+  async function runAnalysis(img: PickedImage) {
+    const area = floorAreaM2();
+    if (area === undefined) {
+      setEstimate(null);
+      setResult(await analyzeSite({ imageBase64: img.base64, mimeType: img.mimeType }));
+      return;
+    }
+    const r = await analyzeSiteWasteItems({
+      imageBase64: img.base64,
+      mimeType: img.mimeType,
+      floorAreaM2: area,
+      ...(structure ? { structure } : {}),
+    });
+    setEstimate(r.estimate ?? null);
+    setResult(r.analysis);
+  }
+
   async function analyze() {
     if (!image) return;
     setError(null);
     setLoading(true);
     try {
-      setResult(await analyzeSite({ imageBase64: image.base64, mimeType: image.mimeType }));
+      await runAnalysis(image);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : '분석에 실패했어요. 다시 시도해 주세요.');
     } finally {
@@ -142,7 +177,7 @@ export function SiteAnalysisScreen() {
     try {
       const picked = await loadSampleBase64(sample);
       setImage(picked);
-      setResult(await analyzeSite({ imageBase64: picked.base64, mimeType: picked.mimeType }));
+      await runAnalysis(picked);
     } catch (err) {
       setError(
         err instanceof ApiError ? err.message : '샘플 분석에 실패했어요. 다시 시도해 주세요.',
@@ -167,9 +202,9 @@ export function SiteAnalysisScreen() {
             <View style={styles.heroBadgeRow}>
               <View style={styles.heroCardBadge}>
                 <View style={styles.pulseDot} />
-                <Text style={styles.heroCardBadgeText}>Vision AI v2.0</Text>
+                <Text style={styles.heroCardBadgeText}>비전 AI 실시간 분석</Text>
               </View>
-              <Text style={styles.heroEngineTag}>딥러닝 공정 엔진</Text>
+              <Text style={styles.heroEngineTag}>다중 모델 폴백 구조</Text>
             </View>
             <Text style={styles.heroCardTitle}>
               현장 사진 한 장으로{'\n'}소재와 철거 공정을 분석해 드려요
@@ -293,11 +328,56 @@ export function SiteAnalysisScreen() {
           </View>
         </FadeInUp>
 
+        {image && !loading ? (
+          <FadeInUp delay={60}>
+            <View style={styles.areaCard}>
+              <Text style={styles.areaTitle}>연면적을 알면 물량까지 추정해 드려요</Text>
+              <Text style={styles.areaSub}>
+                {result
+                  ? '연면적을 넣고 다시 분석하면 예상 톤수와 트럭 대수까지 나옵니다.'
+                  : '선택 입력이에요. 비워두면 소재·공정 분석만 진행합니다.'}
+              </Text>
+              <View style={styles.areaInputRow}>
+                <TextInput
+                  style={styles.areaInput}
+                  value={pyeong}
+                  onChangeText={setPyeong}
+                  keyboardType="numeric"
+                  inputMode="numeric"
+                  placeholder="예: 40"
+                  placeholderTextColor={theme.colors.textMuted}
+                  accessibilityLabel="연면적(평) 입력"
+                />
+                <Text style={styles.areaUnit}>평</Text>
+              </View>
+              <Text style={styles.areaStructLabel}>주구조 (선택하면 추정이 정밀해져요)</Text>
+              <View style={styles.structRow}>
+                {(['RC', 'BRICK', 'WOOD'] as BuildingStructure[]).map((k) => {
+                  const on = structure === k;
+                  return (
+                    <PressableScale
+                      key={k}
+                      style={[styles.structChip, on && styles.structChipOn]}
+                      onPress={() => setStructure(on ? null : k)}
+                      accessibilityRole="button"
+                      accessibilityState={{ selected: on }}
+                    >
+                      <Text style={[styles.structChipText, on && styles.structChipTextOn]}>
+                        {BUILDING_STRUCTURE_LABELS[k]}
+                      </Text>
+                    </PressableScale>
+                  );
+                })}
+              </View>
+            </View>
+          </FadeInUp>
+        ) : null}
+
         <ErrorBanner message={error} />
 
         {loading ? <AnalysisProgress /> : null}
 
-        {result ? <AnalysisResult result={result} /> : null}
+        {result ? <AnalysisResult result={result} estimate={estimate} /> : null}
 
         {/* 로그인이 없어도 수집·이용 고지는 제공한다(사진은 분석 즉시 폐기, 저장하지 않음). */}
         <View style={styles.legalFooter}>
@@ -317,9 +397,13 @@ export function SiteAnalysisScreen() {
         </View>
       </ScrollView>
 
-      {image && !result ? (
+      {image ? (
         <StickyFooter>
-          <AppButton label="이 사진 분석하기" onPress={analyze} loading={loading} />
+          <AppButton
+            label={result ? '면적 반영해 다시 분석' : '이 사진 분석하기'}
+            onPress={analyze}
+            loading={loading}
+          />
         </StickyFooter>
       ) : null}
 
@@ -373,6 +457,40 @@ function MaterialRow({ m, maxKg }: { m: DetectedMaterial; maxKg: number }) {
   );
 }
 
+/** 연면적 기반 물량 추정 — 현장에서 실제로 필요한 "몇 톤, 트럭 몇 대"를 보여준다. */
+function VolumeEstimateCard({ estimate }: { estimate: VolumeEstimate }) {
+  return (
+    <View style={styles.estimateCard}>
+      <View style={styles.estimateHead}>
+        <AppIcon name="recycle" size={18} color={theme.colors.primary} />
+        <Text style={styles.estimateTitle}>연면적 기반 물량 추정</Text>
+        <View style={styles.estimateConfChip}>
+          <Text style={styles.estimateConfText}>
+            신뢰도 {CONFIDENCE_LABELS[estimate.confidence] ?? estimate.confidence}
+          </Text>
+        </View>
+      </View>
+
+      <Text style={styles.estimateHero}>{estimate.estimatedTons}톤</Text>
+      <Text style={styles.estimateRange}>
+        예상 범위 {estimate.rangeMinTons}~{estimate.rangeMaxTons}톤 · 연면적{' '}
+        {Math.round(estimate.floorAreaM2).toLocaleString('ko-KR')}㎡
+      </Text>
+
+      <View style={styles.truckRow}>
+        {estimate.truckLoads.map((t) => (
+          <View key={t.capacityTons} style={styles.truckTile}>
+            <Text style={styles.truckLabel}>{t.capacityTons}톤 트럭</Text>
+            <Text style={styles.truckCount}>{t.count}대</Text>
+          </View>
+        ))}
+      </View>
+
+      <Text style={styles.estimateNote}>{estimate.disclaimer}</Text>
+    </View>
+  );
+}
+
 /** 결과 상단 요약 지표 — 차트가 아니라 수치 타일이 맞는 자리(값 3개, 비교 아님). */
 function ResultStats({ materials }: { materials: DetectedMaterial[] }) {
   const totalKg = materials.reduce((sum, m) => sum + (m.estimatedKg ?? 0), 0);
@@ -401,7 +519,7 @@ function ResultStats({ materials }: { materials: DetectedMaterial[] }) {
   );
 }
 
-function AnalysisResult({ result }: { result: SiteAnalysis }) {
+function AnalysisResult({ result, estimate }: { result: SiteAnalysis; estimate: VolumeEstimate | null }) {
   const maxKg = Math.max(0, ...result.materials.map((m) => m.estimatedKg ?? 0));
   return (
     <View style={{ marginTop: theme.spacing.md }}>
@@ -425,6 +543,12 @@ function AnalysisResult({ result }: { result: SiteAnalysis }) {
       <FadeInUp delay={70}>
         <ResultStats materials={result.materials} />
       </FadeInUp>
+
+      {estimate ? (
+        <FadeInUp delay={90}>
+          <VolumeEstimateCard estimate={estimate} />
+        </FadeInUp>
+      ) : null}
 
       <Text style={styles.sectionTitle}>구성 소재 ({result.materials.length})</Text>
       <FadeInUp delay={100}>
@@ -687,6 +811,91 @@ const styles = StyleSheet.create({
   sampleCredit: {
     color: colors.textMuted,
     fontSize: 10,
+    marginTop: spacing.sm,
+  },
+
+  /* 연면적 입력 카드 */
+  areaCard: {
+    backgroundColor: colors.background,
+    borderColor: colors.border,
+    borderWidth: 1,
+    borderRadius: radius.card,
+    padding: spacing.md,
+    marginTop: spacing.md,
+  },
+  areaTitle: { color: colors.text, fontSize: font.bodyLarge, fontWeight: '800' },
+  areaSub: { color: colors.textMuted, fontSize: 13, marginTop: 4 },
+  areaInputRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+    marginTop: spacing.sm,
+  },
+  areaInput: {
+    flex: 1,
+    borderColor: colors.border,
+    borderWidth: 1.5,
+    borderRadius: radius.button,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 12,
+    fontSize: font.bodyLarge,
+    color: colors.text,
+    backgroundColor: colors.background,
+  },
+  areaUnit: { color: colors.text, fontSize: font.bodyLarge, fontWeight: '700' },
+  areaStructLabel: { color: colors.textMuted, fontSize: 12, marginTop: spacing.sm },
+  structRow: { flexDirection: 'row', gap: spacing.xs, marginTop: 6 },
+  structChip: {
+    flex: 1,
+    alignItems: 'center',
+    paddingVertical: 10,
+    borderRadius: radius.button,
+    borderWidth: 1.5,
+    borderColor: colors.border,
+    backgroundColor: colors.background,
+  },
+  structChipOn: { borderColor: colors.primary, backgroundColor: colors.primarySoft },
+  structChipText: { color: colors.textMuted, fontSize: 13, fontWeight: '700' },
+  structChipTextOn: { color: colors.primary },
+
+  /* 물량 추정 결과 카드 */
+  estimateCard: {
+    backgroundColor: '#0F172A',
+    borderRadius: radius.card,
+    padding: spacing.md,
+    marginBottom: spacing.xs,
+  },
+  estimateHead: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  estimateTitle: { color: '#F8FAFC', fontSize: font.body, fontWeight: '800', flex: 1 },
+  estimateConfChip: {
+    backgroundColor: 'rgba(255,255,255,0.12)',
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 3,
+  },
+  estimateConfText: { color: '#93C5FD', fontSize: 11, fontWeight: '700' },
+  estimateHero: {
+    color: '#FFFFFF',
+    fontSize: 40,
+    fontWeight: '800',
+    marginTop: spacing.sm,
+    letterSpacing: -0.5,
+  },
+  estimateRange: { color: '#94A3B8', fontSize: 13, marginTop: 2 },
+  truckRow: { flexDirection: 'row', gap: spacing.xs, marginTop: spacing.sm },
+  truckTile: {
+    flex: 1,
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    borderRadius: 12,
+    paddingVertical: spacing.sm,
+    alignItems: 'center',
+  },
+  truckLabel: { color: '#94A3B8', fontSize: 12, fontWeight: '600' },
+  truckCount: { color: '#F8FAFC', fontSize: 20, fontWeight: '800', marginTop: 2 },
+  estimateNote: {
+    color: '#64748B',
+    fontSize: 11,
+    lineHeight: 16,
     marginTop: spacing.sm,
   },
 

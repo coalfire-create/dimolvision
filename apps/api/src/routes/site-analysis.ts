@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { siteAnalysisToWasteItems, type SiteAnalysis } from '@dimol/shared';
+import { siteAnalysisToWasteItems, type SiteAnalysis, type VolumeEstimate } from '@dimol/shared';
 import {
   SiteAnalysisValidationError,
   VisionProviderError,
@@ -106,26 +106,44 @@ export function createSiteAnalysisRouter(
     }
   });
 
-  // POST /api/site-analysis/waste-items  { imageBase64, mimeType?, note?, floorAreaM2? }
-  //  사진 → 소재 식별(SiteAnalyzer) + 총 중량 추정(VolumeEstimator, floorAreaM2 있을 때) →
-  //  요청서 소재별 항목(wasteItems)으로 자동 변환. 소비자 직접 운반요청 등에서 프리필에 쓴다.
+  // POST /api/site-analysis/waste-items
+  //   { imageBase64|images, mimeType?, note?, floorAreaM2?, floors?, structure? }
+  //  사진 → 소재 식별(SiteAnalyzer) + 면적 기반 물량 추정(VolumeEstimator) →
+  //  요청서 소재별 항목(wasteItems)으로 자동 변환.
+  //
+  //  추정 결과(estimate)를 그대로 함께 돌려준다. 예전에는 총 중량만 뽑아 쓰고
+  //  트럭 대수·추정 범위·신뢰도를 버렸는데, 현장에서 견적을 잡을 때 정작 필요한 건
+  //  "몇 톤이고 트럭 몇 대냐" 라서 클라이언트가 쓸 수 있게 내보낸다.
   router.post('/site-analysis/waste-items', async (req, res) => {
     const body = (req.body ?? {}) as Record<string, unknown>;
     const input = parseInput(body);
     const floorAreaM2 =
       typeof body.floorAreaM2 === 'number' && body.floorAreaM2 > 0 ? body.floorAreaM2 : undefined;
+    const floors =
+      typeof body.floors === 'number' && Number.isInteger(body.floors) && body.floors > 0
+        ? body.floors
+        : undefined;
+    const structure =
+      body.structure === 'RC' || body.structure === 'BRICK' || body.structure === 'WOOD'
+        ? body.structure
+        : undefined;
     try {
       const analysis = await analyzeWithFallback(input);
       let totalKg: number | undefined;
+      let estimate: VolumeEstimate | undefined;
       if (estimator && floorAreaM2 !== undefined) {
         try {
-          const estimate = await estimator.estimate({ floorAreaM2 });
+          estimate = await estimator.estimate({ floorAreaM2, floors, structure });
           totalKg = estimate.estimatedTons * 1000;
         } catch {
-          // 중량 추정 실패해도 소재별 기본값으로 진행(사진 분석 자체는 성공).
+          // 면적 입력이 잘못돼도 사진 분석 자체는 성공이므로 소재별 기본값으로 진행한다.
         }
       }
-      res.json({ analysis, wasteItems: siteAnalysisToWasteItems(analysis.materials, totalKg) });
+      res.json({
+        analysis,
+        wasteItems: siteAnalysisToWasteItems(analysis.materials, totalKg),
+        ...(estimate ? { estimate } : {}),
+      });
     } catch (err) {
       if (err instanceof SiteAnalysisValidationError) {
         res.status(400).json({ error: err.message });

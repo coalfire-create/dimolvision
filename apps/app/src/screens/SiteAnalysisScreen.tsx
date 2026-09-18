@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { Image, Linking, ScrollView, StyleSheet, Text, View } from 'react-native';
+import React, { useEffect, useState } from 'react';
+import { ActivityIndicator, Image, Linking, ScrollView, StyleSheet, Text, View } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import {
   MATERIAL_CATEGORY_LABELS,
@@ -23,6 +23,46 @@ import brandmark from '../../assets/brandmark.png';
  */
 
 const CONFIDENCE_LABELS: Record<string, string> = { LOW: '참고', MEDIUM: '보통', HIGH: '높음' };
+
+/**
+ * 분석은 보통 10~20초 걸린다. 스피너만 돌면 멈춘 것처럼 보이므로,
+ * 실제 파이프라인 단계를 순서대로 보여주고 경과 시간을 함께 노출한다.
+ * (진행률을 지어내지 않는다 — 모델 응답 시점을 미리 알 수 없다.)
+ */
+const ANALYSIS_STAGES = [
+  { at: 0, label: '현장 사진을 업로드하고 있어요' },
+  { at: 3, label: 'AI 가 사진 속 소재를 살펴보는 중이에요' },
+  { at: 8, label: '철거 공정과 위험요소를 정리하는 중이에요' },
+  { at: 16, label: '거의 다 됐어요. 리포트를 마무리하는 중이에요' },
+];
+
+function AnalysisProgress() {
+  const [elapsed, setElapsed] = useState(0);
+  useEffect(() => {
+    const t = setInterval(() => setElapsed((v) => v + 1), 1000);
+    return () => clearInterval(t);
+  }, []);
+  const stage = [...ANALYSIS_STAGES].reverse().find((s) => elapsed >= s.at) ?? ANALYSIS_STAGES[0]!;
+  return (
+    <View style={styles.progressCard} accessibilityRole="progressbar" accessibilityLabel={stage.label}>
+      <ActivityIndicator color={theme.colors.primary} />
+      <View style={{ flex: 1 }}>
+        <Text style={styles.progressLabel}>{stage.label}</Text>
+        <Text style={styles.progressMeta}>{elapsed}초 경과 · 보통 10~20초 걸려요</Text>
+      </View>
+    </View>
+  );
+}
+
+/** kg 을 읽기 쉬운 단위로. 1톤 이상은 톤으로 끊는다(현장에서 쓰는 단위). */
+function formatWeight(kg: number): string {
+  if (kg >= 1000) {
+    const t = kg / 1000;
+    return `${t >= 10 ? Math.round(t) : Math.round(t * 10) / 10}톤`;
+  }
+  return `${Math.round(kg).toLocaleString('ko-KR')}kg`;
+}
+
 
 interface PickedImage {
   base64: string;
@@ -255,6 +295,8 @@ export function SiteAnalysisScreen() {
 
         <ErrorBanner message={error} />
 
+        {loading ? <AnalysisProgress /> : null}
+
         {result ? <AnalysisResult result={result} /> : null}
 
         {/* 로그인이 없어도 수집·이용 고지는 제공한다(사진은 분석 즉시 폐기, 저장하지 않음). */}
@@ -290,7 +332,10 @@ export function SiteAnalysisScreen() {
   );
 }
 
-function MaterialRow({ m }: { m: DetectedMaterial }) {
+function MaterialRow({ m, maxKg }: { m: DetectedMaterial; maxKg: number }) {
+  // 비중 막대는 가장 무거운 소재를 100% 로 둔 상대 크기. 색은 위험물만 구분하고,
+  // 오른쪽 태그 텍스트가 같은 정보를 글로도 주므로 색만으로 판단하게 두지 않는다.
+  const share = maxKg > 0 && m.estimatedKg ? Math.max(0.04, m.estimatedKg / maxKg) : 0;
   return (
     <View style={[styles.materialRow, m.hazardous && styles.materialRowHazard]}>
       <View style={styles.materialTop}>
@@ -304,6 +349,22 @@ function MaterialRow({ m }: { m: DetectedMaterial }) {
           </Text>
         </View>
       </View>
+      {m.estimatedKg ? (
+        <View style={styles.weightRow}>
+          <View style={styles.weightTrack}>
+            <View
+              style={[
+                styles.weightFill,
+                { width: `${share * 100}%` },
+                m.hazardous && styles.weightFillHazard,
+              ]}
+            />
+          </View>
+          <Text style={[styles.weightValue, m.hazardous && styles.weightValueHazard]}>
+            {formatWeight(m.estimatedKg)}
+          </Text>
+        </View>
+      ) : null}
       <Text style={styles.materialMeta}>
         {MATERIAL_CATEGORY_LABELS[m.category]} · 신뢰도 {CONFIDENCE_LABELS[m.confidence] ?? m.confidence}
         {m.note ? ` · ${m.note}` : ''}
@@ -312,7 +373,36 @@ function MaterialRow({ m }: { m: DetectedMaterial }) {
   );
 }
 
+/** 결과 상단 요약 지표 — 차트가 아니라 수치 타일이 맞는 자리(값 3개, 비교 아님). */
+function ResultStats({ materials }: { materials: DetectedMaterial[] }) {
+  const totalKg = materials.reduce((sum, m) => sum + (m.estimatedKg ?? 0), 0);
+  const recyclableKg = materials
+    .filter((m) => m.recyclable && !m.hazardous)
+    .reduce((sum, m) => sum + (m.estimatedKg ?? 0), 0);
+  const hazardCount = materials.filter((m) => m.hazardous).length;
+  if (totalKg <= 0) return null;
+  return (
+    <View style={styles.statRow}>
+      <View style={styles.statTile}>
+        <Text style={styles.statLabel}>예상 폐기물 총량</Text>
+        <Text style={styles.statValue}>{formatWeight(totalKg)}</Text>
+      </View>
+      <View style={styles.statTile}>
+        <Text style={styles.statLabel}>재활용 가능</Text>
+        <Text style={styles.statValue}>{Math.round((recyclableKg / totalKg) * 100)}%</Text>
+      </View>
+      <View style={styles.statTile}>
+        <Text style={styles.statLabel}>위험물 항목</Text>
+        <Text style={[styles.statValue, hazardCount > 0 && styles.statValueHazard]}>
+          {hazardCount}건
+        </Text>
+      </View>
+    </View>
+  );
+}
+
 function AnalysisResult({ result }: { result: SiteAnalysis }) {
+  const maxKg = Math.max(0, ...result.materials.map((m) => m.estimatedKg ?? 0));
   return (
     <View style={{ marginTop: theme.spacing.md }}>
       <FadeInUp delay={40}>
@@ -332,13 +422,17 @@ function AnalysisResult({ result }: { result: SiteAnalysis }) {
         </View>
       </FadeInUp>
 
+      <FadeInUp delay={70}>
+        <ResultStats materials={result.materials} />
+      </FadeInUp>
+
       <Text style={styles.sectionTitle}>구성 소재 ({result.materials.length})</Text>
       <FadeInUp delay={100}>
         <Card>
           {result.materials.map((m, i) => (
             <View key={`${m.name}-${i}`}>
               {i > 0 ? <View style={styles.divider} /> : null}
-              <MaterialRow m={m} />
+              <MaterialRow m={m} maxKg={maxKg} />
             </View>
           ))}
         </Card>
@@ -594,6 +688,94 @@ const styles = StyleSheet.create({
     color: colors.textMuted,
     fontSize: 10,
     marginTop: spacing.sm,
+  },
+
+  /* 분석 진행 안내 */
+  progressCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    backgroundColor: colors.primarySoft,
+    borderColor: '#BFDBFE',
+    borderWidth: 1,
+    borderRadius: radius.card,
+    padding: spacing.md,
+    marginTop: spacing.md,
+  },
+  progressLabel: {
+    color: colors.text,
+    fontSize: font.body,
+    fontWeight: '700',
+  },
+  progressMeta: {
+    color: colors.textMuted,
+    fontSize: 12,
+    marginTop: 2,
+  },
+
+  /* 소재별 추정 중량 */
+  weightRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    marginTop: 6,
+  },
+  weightTrack: {
+    flex: 1,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: colors.surface,
+    overflow: 'hidden',
+  },
+  weightFill: {
+    height: '100%',
+    borderRadius: 3,
+    backgroundColor: colors.primary,
+  },
+  weightFillHazard: {
+    backgroundColor: colors.error,
+  },
+  weightValue: {
+    color: colors.primary,
+    fontSize: 13,
+    fontWeight: '800',
+    minWidth: 56,
+    textAlign: 'right',
+  },
+  weightValueHazard: {
+    color: colors.error,
+  },
+
+  /* 결과 요약 수치 타일 */
+  statRow: {
+    flexDirection: 'row',
+    gap: spacing.xs,
+    marginBottom: spacing.xs,
+  },
+  statTile: {
+    flex: 1,
+    backgroundColor: colors.background,
+    borderColor: colors.border,
+    borderWidth: 1,
+    borderRadius: radius.card,
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.xs,
+    alignItems: 'center',
+  },
+  statLabel: {
+    color: colors.textMuted,
+    fontSize: 11,
+    fontWeight: '600',
+    textAlign: 'center',
+  },
+  statValue: {
+    color: colors.text,
+    fontSize: 20,
+    fontWeight: '800',
+    marginTop: 4,
+  },
+  statValueHazard: {
+    color: colors.error,
   },
 
   /* 법적 고지 푸터 */

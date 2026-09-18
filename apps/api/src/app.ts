@@ -17,41 +17,55 @@ import { env, activeVisionProvider } from './config/env.js';
  * 무상태. DB·인증 없음. 비전 공급자는 env 키로 선택하고, 실패 시 목으로 폴백한다.
  */
 /**
- * 설정된 키에 따라 비전 공급자를 고른다(env.activeVisionProvider 와 같은 우선순위).
- * 자체 GPU VLM 이 최우선 — 상용 운영에서 호출당 외부 과금 없이 단가를 고정하기 위함.
+ * 설정된 키로 분석기 체인을 우선순위 순서대로 만든다(env.activeVisionProvider 와 같은 순서).
+ *
+ * 하나만 고르지 않고 **설정된 것을 전부** 순서대로 쌓는 이유는, 앞선 공급자가 런타임에
+ * 실패해도 뒤가 받아주기 때문이다. 자체 GPU VLM 을 최우선에 두되(호출당 외부 과금 없음·
+ * 데이터 주권), GPU 가 콜드스타트나 쿼터로 흔들리는 순간 호스팅 API 가 대신 처리해
+ * 목(MOCK)으로 떨어지는 걸 막는다. 목은 항상 체인의 마지막이다.
  */
-function selectAnalyzer(fallback: SiteAnalyzer): SiteAnalyzer {
+function buildAnalyzerChain(mock: SiteAnalyzer): SiteAnalyzer[] {
   const { visionTimeoutMs } = env.ai;
+  const chain: SiteAnalyzer[] = [];
   if (env.ai.vlmBaseUrl) {
-    return new SelfHostedVlmAnalyzer({
-      baseUrl: env.ai.vlmBaseUrl,
-      model: env.ai.vlmModel,
-      apiKey: env.ai.vlmApiKey,
-      timeoutMs: visionTimeoutMs,
-    });
+    chain.push(
+      new SelfHostedVlmAnalyzer({
+        baseUrl: env.ai.vlmBaseUrl,
+        model: env.ai.vlmModel,
+        apiKey: env.ai.vlmApiKey,
+        timeoutMs: visionTimeoutMs,
+      }),
+    );
   }
   if (env.ai.groqApiKey) {
-    return new GroqSiteAnalyzer({
-      apiKey: env.ai.groqApiKey,
-      model: env.ai.groqModel,
-      timeoutMs: visionTimeoutMs,
-    });
+    chain.push(
+      new GroqSiteAnalyzer({
+        apiKey: env.ai.groqApiKey,
+        model: env.ai.groqModel,
+        timeoutMs: visionTimeoutMs,
+      }),
+    );
   }
   if (env.ai.geminiApiKey) {
-    return new GeminiSiteAnalyzer({
-      apiKey: env.ai.geminiApiKey,
-      model: env.ai.geminiModel,
-      timeoutMs: visionTimeoutMs,
-    });
+    chain.push(
+      new GeminiSiteAnalyzer({
+        apiKey: env.ai.geminiApiKey,
+        model: env.ai.geminiModel,
+        timeoutMs: visionTimeoutMs,
+      }),
+    );
   }
   if (env.ai.anthropicApiKey) {
-    return new ClaudeSiteAnalyzer({
-      apiKey: env.ai.anthropicApiKey,
-      model: env.ai.anthropicModel,
-      timeoutMs: visionTimeoutMs,
-    });
+    chain.push(
+      new ClaudeSiteAnalyzer({
+        apiKey: env.ai.anthropicApiKey,
+        model: env.ai.anthropicModel,
+        timeoutMs: visionTimeoutMs,
+      }),
+    );
   }
-  return fallback;
+  chain.push(mock);
+  return chain;
 }
 
 export function createApp() {
@@ -61,34 +75,13 @@ export function createApp() {
   app.use(express.json({ limit: '15mb' }));
 
   const mock = new MockSiteAnalyzer();
-  const primary = selectAnalyzer(mock);
+  const chain = buildAnalyzerChain(mock);
 
   app.get('/api/health', (_req, res) => {
     res.json({ ok: true, provider: activeVisionProvider() });
   });
 
-  // [임시 진단] 이 계정이 실제로 쓸 수 있는 Groq 모델 목록. 모델 404 원인 확인용 — 확인 후 제거한다.
-  app.get('/api/_diag/models', async (_req, res) => {
-    if (!env.ai.groqApiKey) {
-      res.json({ error: 'no groq key' });
-      return;
-    }
-    try {
-      const r = await fetch('https://api.groq.com/openai/v1/models', {
-        headers: { authorization: `Bearer ${env.ai.groqApiKey}` },
-      });
-      const body = (await r.json()) as { data?: Array<{ id?: string }> };
-      res.json({
-        status: r.status,
-        configured: env.ai.groqModel,
-        models: (body.data ?? []).map((m) => m.id).sort(),
-      });
-    } catch (err) {
-      res.json({ error: err instanceof Error ? err.message : 'failed' });
-    }
-  });
-
-  app.use('/api', createSiteAnalysisRouter(primary, mock, new HeuristicVolumeEstimator()));
+  app.use('/api', createSiteAnalysisRouter(chain, new HeuristicVolumeEstimator()));
 
   return app;
 }

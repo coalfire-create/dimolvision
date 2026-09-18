@@ -243,17 +243,25 @@ export interface GroqAnalyzerConfig {
   model: string;
   timeoutMs: number;
   baseUrl?: string;
+  /** 요청당 이미지 상한. Groq 의 qwen3.8-27b 는 3장까지만 받는다. */
+  maxImages?: number;
 }
+
+/** Groq 비전 모델의 요청당 이미지 한도(qwen3.8-27b 기준). 초과하면 400 이 난다. */
+export const GROQ_MAX_IMAGES = 3;
 
 /**
  * Groq 비전 분석 — 무료 티어(카드 불필요). OpenAI 호환 chat/completions.
  * qwen3 계열은 추론(<think>) 모델이라 reasoning_effort:'none' + JSON 강제로 깨끗한 결과를 받는다.
+ *
+ * 우리 API 는 6장까지 받지만(MAX_ANALYZE_IMAGES) Groq 는 3장이 한도라, 여기서 잘라 보낸다.
+ * 다중 촬영에서 전체 요청이 실패하는 것보다 앞의 몇 장으로라도 분석하는 편이 낫다.
  */
 export class GroqSiteAnalyzer implements SiteAnalyzer {
   constructor(private readonly config: GroqAnalyzerConfig) {}
 
   async analyze(input: AnalyzeSiteInput): Promise<SiteAnalysis> {
-    const images = assertValidImages(input);
+    const images = assertValidImages(input).slice(0, this.config.maxImages ?? GROQ_MAX_IMAGES);
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), this.config.timeoutMs);
     const base = this.config.baseUrl ?? 'https://api.groq.com/openai/v1';

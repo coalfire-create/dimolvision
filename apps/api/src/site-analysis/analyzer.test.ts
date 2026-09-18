@@ -2,6 +2,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   ClaudeSiteAnalyzer,
   MockSiteAnalyzer,
+  GROQ_MAX_IMAGES,
+  GroqSiteAnalyzer,
   SelfHostedVlmAnalyzer,
   SiteAnalysisValidationError,
 } from './analyzer.js';
@@ -209,5 +211,37 @@ describe('SelfHostedVlmAnalyzer', () => {
       SiteAnalysisValidationError,
     );
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+});
+
+describe('GroqSiteAnalyzer 이미지 한도', () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('Groq 한도(3장)를 넘는 요청은 잘라서 보낸다', async () => {
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      json: async () => ({
+        choices: [
+          {
+            message: {
+              content:
+                '{"summary":"현장","materials":[],"demolitionSteps":[],"hazards":[],"confidence":"LOW"}',
+            },
+          },
+        ],
+      }),
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const analyzer = new GroqSiteAnalyzer({ apiKey: 'k', model: 'qwen/qwen3.8-27b', timeoutMs: 5000 });
+    await analyzer.analyze({
+      images: Array.from({ length: 6 }, (_, i) => ({ imageBase64: `${IMG}${i}`, mimeType: 'image/jpeg' })),
+    });
+
+    const body = JSON.parse(fetchMock.mock.calls[0]?.[1]?.body as string);
+    const imageBlocks = body.messages[1].content.filter(
+      (c: { type: string }) => c.type === 'image_url',
+    );
+    expect(imageBlocks).toHaveLength(GROQ_MAX_IMAGES);
   });
 });

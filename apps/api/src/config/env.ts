@@ -21,7 +21,7 @@ export const env = {
     /** Cloud Run 을 비공개로 둘 때 쓰는 공유 토큰(선택). */
     vlmApiKey: process.env.VLM_API_KEY,
     groqApiKey: process.env.GROQ_API_KEY,
-    groqModel: process.env.GROQ_MODEL ?? 'qwen/qwen3.6-27b',
+    groqModel: process.env.GROQ_MODEL ?? 'qwen/qwen3.8-27b',
     geminiApiKey: process.env.GEMINI_API_KEY,
     geminiModel: process.env.GEMINI_MODEL ?? 'gemini-2.0-flash',
     anthropicApiKey: process.env.ANTHROPIC_API_KEY,

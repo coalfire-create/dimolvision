@@ -31,19 +31,19 @@ GPU VM(GCE)이 아니라 Cloud Run 을 고른 이유는 **요청이 없을 때 0
    ```bash
    gcloud billing projects link "$PROJECT_ID" --billing-account=010504-A634F9-0E7A07
    ```
-2. **GPU 쿼터 신청** — 신규 프로젝트는 Cloud Run GPU 쿼터가 0 이다.
-   [IAM & 관리 → 할당량](https://console.cloud.google.com/iam-admin/quotas)에서
-   `Total Nvidia L4 GPU allocation, per project per region` 을 검색해 배포할 리전에
-   최소 1 이상을 신청한다. 승인까지 보통 1~2 영업일이 걸리니 **가장 먼저** 해둘 것.
-3. **리전 선택** — L4 는 모든 리전에 있지 않다. 서울(`asia-northeast3`) 제공 여부는
-   프로젝트마다 다르므로 [Cloud Run GPU 문서](https://cloud.google.com/run/docs/configuring/services/gpu)의
-   지원 리전 표에서 확인한 뒤 `REGION` 을 정한다. 한국 사용자 지연시간이 중요하면
-   아시아 리전을, 확실한 가용성이 우선이면 `us-central1` 을 쓴다.
+2. **GPU 쿼터 — 사전 신청 불필요.** 2025년 6월 이후 Cloud Run L4 는 쿼터 신청 없이 쓴다.
+   해당 리전에서 **첫 배포를 만드는 시점에 3개가 자동 부여**된다(영역 중복 off 기준).
+   더 필요할 때만 증설을 신청하면 된다. 다만 자동 부여가 즉시 반영되지 않는 사례가
+   보고된 적이 있으니, 첫 배포가 쿼터 오류로 실패하면 몇 분 뒤 한 번 더 시도해 본다.
+3. **리전** — L4 는 다음 리전에만 있다(2026-09 기준):
+   `asia-southeast1`(싱가포르) · `europe-west1` · `europe-west4` ·
+   `us-central1` · `us-east4`. **서울(`asia-northeast3`)은 지원하지 않는다.**
+   한국 사용자 지연시간을 생각하면 싱가포르가 최선이라 스크립트 기본값으로 뒀다.
 
 ## 배포
 
 ```bash
-PROJECT_ID=<프로젝트ID> REGION=us-central1 ./infra/gcp/deploy-vlm.sh
+PROJECT_ID=<프로젝트ID> ./infra/gcp/deploy-vlm.sh   # 리전 기본값 asia-southeast1
 ```
 
 스크립트가 하는 일: API 활성화 → Artifact Registry 생성 → 이미지 빌드(모델 가중치 포함)
@@ -51,6 +51,22 @@ PROJECT_ID=<프로젝트ID> REGION=us-central1 ./infra/gcp/deploy-vlm.sh
 
 빌드는 모델을 이미지에 굽기 때문에 **20~40분** 걸린다. 콜드스타트를 줄이려는 의도적인
 선택이다(매 기동마다 허깅페이스에서 수 GB 를 받으면 첫 응답이 수 분이 된다).
+
+**결제 활성화부터 엔드포인트가 살아나기까지 대략 45~60분**이면 된다. 쿼터 승인 대기가
+없어졌기 때문이다.
+
+### 심사·시연처럼 첫인상이 중요한 기간
+
+`--min-instances 0` 이면 유휴 비용은 0 이지만 첫 요청이 모델 로딩을 기다린다. 우리
+API 의 비전 타임아웃은 30초라, 콜드스타트가 그보다 길면 체인이 호스팅 API 로 넘겨버려
+정작 GPU 가 안 쓰인다. 심사 기간에만 인스턴스를 하나 띄워두면 이 문제가 사라진다.
+
+```bash
+gcloud run services update dimolvision-vlm --region "$REGION" --min-instances 1   # 기간 시작
+gcloud run services update dimolvision-vlm --region "$REGION" --min-instances 0   # 기간 종료
+```
+
+켜둔 시간만큼 GPU 가 과금되므로, **기간이 끝나면 반드시 0 으로 되돌린다.**
 
 배포가 끝나면 출력된 값을 디몰비전 API 환경에 넣는다.
 
@@ -102,9 +118,8 @@ gcloud billing budgets create \
 gcloud run services update dimolvision-vlm --region "$REGION" --max-instances 2
 ```
 
-`--min-instances 0` 을 유지하는 한 유휴 비용은 발생하지 않는다. 콜드스타트를 없애려고
-`--min-instances 1` 로 바꾸면 **24시간 GPU 과금**이 시작되니, 실제 트래픽이 붙은 뒤에만
-검토한다.
+`--min-instances 0` 을 유지하는 한 유휴 비용은 발생하지 않는다. `--min-instances 1` 은
+켜둔 시간 내내 GPU 가 과금되므로, 위의 심사·시연 절처럼 **기간을 정해놓고만** 쓴다.
 
 ## 운영 체크리스트
 

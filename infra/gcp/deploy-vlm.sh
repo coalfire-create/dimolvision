@@ -12,7 +12,7 @@
 set -euo pipefail
 
 PROJECT_ID="${PROJECT_ID:-$(gcloud config get-value project 2>/dev/null)}"
-REGION="${REGION:-us-central1}"          # L4 GPU 제공 리전. README 의 리전 표 참고.
+REGION="${REGION:-asia-southeast1}"     # L4 지원 리전 중 한국에서 가장 가까움(싱가포르).
 SERVICE="${SERVICE:-dimolvision-vlm}"
 REPO="${REPO:-dimolvision}"
 MODEL_ID="${MODEL_ID:-Qwen/Qwen2.5-VL-7B-Instruct-AWQ}"

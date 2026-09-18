@@ -289,7 +289,7 @@ export function SiteAnalysisScreen() {
               <Text style={styles.heroEngineTag}>다중 모델 폴백 구조</Text>
             </View>
             <Text style={styles.heroCardTitle}>
-              현장 사진 한 장으로{'\n'}소재와 철거 공정을 분석해 드려요
+              현장 사진을 올리면{'\n'}소재·공정·물량을 한 번에 분석해요
             </Text>
             <View style={styles.heroChipsRow}>
               <View style={styles.heroChip}>
@@ -298,11 +298,11 @@ export function SiteAnalysisScreen() {
               </View>
               <View style={styles.heroChip}>
                 <AppIcon name="recycle" size={13} color="#93C5FD" />
-                <Text style={styles.heroChipText}>부피·폐기물 분류</Text>
+                <Text style={styles.heroChipText}>물량·트럭 대수 추정</Text>
               </View>
               <View style={styles.heroChip}>
                 <AppIcon name="document" size={13} color="#93C5FD" />
-                <Text style={styles.heroChipText}>공정 주의사항 리포트</Text>
+                <Text style={styles.heroChipText}>여러 장 종합 분석</Text>
               </View>
             </View>
             <View style={styles.noLoginRow}>
@@ -603,6 +603,95 @@ function MaterialRow({ m, maxKg }: { m: DetectedMaterial; maxKg: number }) {
   );
 }
 
+/** HTML 특수문자 이스케이프 — 분석 결과에 <, & 가 섞여도 문서가 깨지지 않게. */
+function escapeHtml(s: string): string {
+  return s
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+/**
+ * 인쇄용 문서를 새 창에 그린다.
+ * 화면을 그대로 인쇄하면 앱 UI(버튼·스크롤 영역)가 섞여 서류로 못 쓴다.
+ * 철거 현장에서는 이 리포트를 출력해 보관하거나 PDF 로 저장해 발주처에 내므로,
+ * 인쇄 전용 레이아웃을 따로 만든다.
+ */
+function buildPrintableHtml(result: SiteAnalysis, estimate: VolumeEstimate | null): string {
+  const e = escapeHtml;
+  const rows = result.materials
+    .map((m) => {
+      const tag = m.hazardous ? '위험물' : m.recyclable ? '재활용 가능' : '일반 처리';
+      return `<tr${m.hazardous ? ' class="hz"' : ''}>
+        <td>${e(m.name)}</td>
+        <td>${e(MATERIAL_CATEGORY_LABELS[m.category] ?? m.category)}</td>
+        <td>${tag}</td>
+        <td class="num">${m.estimatedKg ? e(formatWeight(m.estimatedKg)) : '-'}</td>
+        <td>${e(CONFIDENCE_LABELS[m.confidence] ?? m.confidence)}</td>
+      </tr>`;
+    })
+    .join('');
+
+  const steps = result.demolitionSteps
+    .map(
+      (st) =>
+        `<li><b>${e(st.title)}</b><br>${e(st.description)}${
+          st.caution ? `<br><span class="cau">주의: ${e(st.caution)}</span>` : ''
+        }</li>`,
+    )
+    .join('');
+
+  const estBlock = estimate
+    ? `<div class="box">
+        <h2>물량 추정</h2>
+        <p class="hero">${estimate.estimatedTons}톤
+          <span class="sub">(범위 ${estimate.rangeMinTons}~${estimate.rangeMaxTons}톤 · 연면적 ${Math.round(
+            estimate.floorAreaM2,
+          ).toLocaleString('ko-KR')}㎡)</span></p>
+        <p>운반 차량: ${estimate.truckLoads.map((t) => `${t.capacityTons}톤 ${t.count}대`).join(' / ')}</p>
+      </div>`
+    : '';
+
+  return `<!doctype html><html lang="ko"><head><meta charset="utf-8">
+<title>디몰비전 현장 분석 리포트</title>
+<style>
+  *{box-sizing:border-box}
+  body{font-family:-apple-system,'Apple SD Gothic Neo','Malgun Gothic',sans-serif;
+       color:#1A1A1A;line-height:1.6;margin:0;padding:32px;max-width:900px}
+  h1{font-size:22px;margin:0 0 4px}
+  .meta{color:#595959;font-size:12px;margin:0 0 20px}
+  h2{font-size:15px;margin:22px 0 8px;padding-bottom:6px;border-bottom:2px solid #2C55E9}
+  .box{background:#F6F7F9;border:1px solid #DCE3F0;border-radius:8px;padding:14px 16px;margin:16px 0}
+  .box h2{margin-top:0;border:0;padding:0}
+  .hero{font-size:26px;font-weight:800;margin:4px 0}
+  .hero .sub{font-size:12px;font-weight:400;color:#595959}
+  table{width:100%;border-collapse:collapse;font-size:13px}
+  th,td{border:1px solid #DCE3F0;padding:7px 9px;text-align:left}
+  th{background:#F6F7F9}
+  td.num{text-align:right}
+  tr.hz td{background:#FDF2F2;color:#C62828;font-weight:600}
+  ol{padding-left:20px}
+  li{margin-bottom:9px}
+  .cau{color:#C62828;font-size:12px}
+  .hazards li{color:#C62828}
+  .note{margin-top:22px;padding-top:12px;border-top:1px solid #DCE3F0;color:#595959;font-size:11px}
+  @media print{body{padding:0}@page{margin:14mm}}
+</style></head><body>
+<h1>철거 현장 분석 리포트</h1>
+<p class="meta">디몰비전(DimolVision) · ${new Date(result.analyzedAt).toLocaleString('ko-KR')} ·
+  ${result.method === 'AI_VISION' ? 'AI 실시간 분석' : '시연용 샘플'}</p>
+<div class="box"><h2>현장 요약</h2><p>${e(result.summary)}</p></div>
+${estBlock}
+<h2>구성 소재 (${result.materials.length})</h2>
+<table><thead><tr><th>소재</th><th>분류</th><th>처리</th><th>추정 중량</th><th>신뢰도</th></tr></thead>
+<tbody>${rows}</tbody></table>
+<h2>권장 철거 공정</h2><ol>${steps}</ol>
+${result.hazards.length ? `<h2>안전 위험요소</h2><ul class="hazards">${result.hazards.map((h) => `<li>${e(h)}</li>`).join('')}</ul>` : ''}
+<p class="note">${e(result.disclaimer)}<br>https://dimolvision.vercel.app</p>
+</body></html>`;
+}
+
 /**
  * 리포트 내보내기. 웹은 클립보드, 네이티브는 기본 공유 시트 — 새 의존성 없이
  * 각 플랫폼이 이미 가진 수단만 쓴다.
@@ -631,18 +720,41 @@ function ShareReportButton({
     }
   }
 
+  function handlePrint() {
+    const w = window.open('', '_blank');
+    if (!w) return; // 팝업 차단 — 복사 버튼이 대안으로 남아 있다.
+    w.document.write(buildPrintableHtml(result, estimate));
+    w.document.close();
+    w.focus();
+    setTimeout(() => w.print(), 300);
+  }
+
   return (
-    <PressableScale
-      style={styles.shareBtn}
-      onPress={() => void handleShare()}
-      accessibilityRole="button"
-      accessibilityLabel="분석 리포트 내보내기"
-    >
-      <AppIcon name="document" size={16} color={theme.colors.primary} />
-      <Text style={styles.shareBtnText}>
-        {copied ? '복사했어요 — 붙여넣기 하세요' : Platform.OS === 'web' ? '리포트 복사' : '리포트 공유'}
-      </Text>
-    </PressableScale>
+    <View style={styles.exportRow}>
+      <PressableScale
+        style={styles.shareBtn}
+        onPress={() => void handleShare()}
+        accessibilityRole="button"
+        accessibilityLabel="분석 리포트 내보내기"
+      >
+        <AppIcon name="document" size={16} color={theme.colors.primary} />
+        <Text style={styles.shareBtnText}>
+          {copied ? '복사했어요' : Platform.OS === 'web' ? '리포트 복사' : '리포트 공유'}
+        </Text>
+      </PressableScale>
+
+      {Platform.OS === 'web' ? (
+        <PressableScale
+          style={styles.shareBtn}
+          onPress={handlePrint}
+          accessibilityRole="button"
+          accessibilityLabel="분석 리포트 인쇄 또는 PDF 저장"
+        >
+          <AppIcon name="document" size={16} color={theme.colors.primary} />
+          <Text style={styles.shareBtnText}>인쇄 · PDF</Text>
+        </PressableScale>
+      ) : null}
+    </View>
   );
 }
 
@@ -1011,7 +1123,9 @@ const styles = StyleSheet.create({
     marginTop: spacing.sm,
   },
 
+  exportRow: { flexDirection: 'row', gap: spacing.xs },
   shareBtn: {
+    flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',

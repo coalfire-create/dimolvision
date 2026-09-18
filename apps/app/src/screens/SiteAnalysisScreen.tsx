@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Image, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Image, Linking, ScrollView, StyleSheet, Text, View } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import {
   MATERIAL_CATEGORY_LABELS,
@@ -12,6 +12,7 @@ import { CameraCaptureModal, type CapturedPhoto } from '../components/CameraCapt
 import { AppButton, Card, ErrorBanner, StickyFooter } from '../components/ui';
 import { FadeInUp, PressableScale } from '../components/motion';
 import { ScreenHeader } from '../navigation';
+import { SAMPLE_SITES, loadSampleBase64, sampleUri, type SampleSite } from '../lib/samples';
 import { theme } from '../theme';
 
 import brandmark from '../../assets/brandmark.png';
@@ -39,6 +40,8 @@ export function SiteAnalysisScreen() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [cameraOpen, setCameraOpen] = useState(false);
+  /** 분석 중인 샘플 id(썸네일에 스피너 표시용). */
+  const [sampleId, setSampleId] = useState<string | null>(null);
 
   function applyAsset(asset: ImagePicker.ImagePickerAsset) {
     if (!asset.base64) {
@@ -87,21 +90,31 @@ export function SiteAnalysisScreen() {
     }
   }
 
-  const SAMPLE_BASE64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
-
-  function loadSampleAndAnalyze() {
-    setImage({
-      base64: SAMPLE_BASE64,
-      mimeType: 'image/png',
-      uri: 'data:image/png;base64,' + SAMPLE_BASE64,
-    });
-    setResult(null);
+  /**
+   * 샘플 현장 사진을 바로 분석한다 — 로그인·회원가입·사진 준비 없이 핵심 기능을 체험하는 경로.
+   * 실제 업로드와 같은 API(analyzeSite)를 타므로 결과도 실제 AI 분석 결과다.
+   */
+  async function runSample(sample: SampleSite) {
     setError(null);
+    setResult(null);
+    setSampleId(sample.id);
     setLoading(true);
-    analyzeSite({ imageBase64: SAMPLE_BASE64, mimeType: 'image/png' })
-      .then((res) => setResult(res))
-      .catch((err) => setError(err instanceof ApiError ? err.message : '분석에 실패했어요.'))
-      .finally(() => setLoading(false));
+    try {
+      const picked = await loadSampleBase64(sample);
+      setImage(picked);
+      setResult(await analyzeSite({ imageBase64: picked.base64, mimeType: picked.mimeType }));
+    } catch (err) {
+      setError(
+        err instanceof ApiError ? err.message : '샘플 분석에 실패했어요. 다시 시도해 주세요.',
+      );
+    } finally {
+      setLoading(false);
+      setSampleId(null);
+    }
+  }
+
+  function openLegal(page: 'privacy' | 'terms') {
+    void Linking.openURL(`/${page}.html`);
   }
 
   return (
@@ -135,6 +148,12 @@ export function SiteAnalysisScreen() {
                 <Text style={styles.heroChipText}>공정 주의사항 리포트</Text>
               </View>
             </View>
+            <View style={styles.noLoginRow}>
+              <AppIcon name="sparkles" size={14} color="#34D399" />
+              <Text style={styles.noLoginText}>
+                회원가입·로그인 없이 모든 기능을 바로 쓸 수 있어요
+              </Text>
+            </View>
           </View>
         </FadeInUp>
 
@@ -159,13 +178,57 @@ export function SiteAnalysisScreen() {
               <Text style={styles.dropzoneSub}>
                 건물 내부, 지붕, 자재가 잘 보이게 찍으면{'\n'}소재 인식과 공정 가이드가 더욱 정확해집니다
               </Text>
-              <PressableScale style={styles.samplePillBtn} onPress={loadSampleAndAnalyze}>
-                <AppIcon name="sparkles" size={18} color="#FFFFFF" />
-                <Text style={styles.samplePillBtnText}>샘플 사진으로 AI 즉시 분석 시연</Text>
-              </PressableScale>
             </View>
           </FadeInUp>
         )}
+
+        {/* 현장 사진이 없어도 바로 체험 — 실제 철거 현장 샘플을 같은 AI 파이프라인으로 분석 */}
+        {!image ? (
+          <FadeInUp delay={100}>
+            <View style={styles.sampleSection}>
+              <View style={styles.sampleHeadRow}>
+                <AppIcon name="sparkles" size={18} color={theme.colors.primary} />
+                <Text style={styles.sampleHeadTitle}>사진이 없으신가요? 바로 체험해 보세요</Text>
+              </View>
+              <Text style={styles.sampleHeadSub}>
+                실제 철거 현장 사진입니다. 누르면 즉시 AI 분석이 실행됩니다.
+              </Text>
+              <View style={styles.sampleRow}>
+                {SAMPLE_SITES.map((s) => (
+                  <PressableScale
+                    key={s.id}
+                    style={styles.sampleCard}
+                    onPress={() => void runSample(s)}
+                    accessibilityRole="button"
+                    accessibilityLabel={`${s.label} 샘플 사진으로 AI 분석 실행`}
+                  >
+                    <View style={styles.sampleThumbWrap}>
+                      <Image
+                        source={{ uri: sampleUri(s) }}
+                        style={styles.sampleThumb}
+                        resizeMode="cover"
+                      />
+                      {sampleId === s.id ? (
+                        <View style={styles.sampleThumbOverlay}>
+                          <Text style={styles.sampleThumbOverlayText}>분석 중…</Text>
+                        </View>
+                      ) : null}
+                    </View>
+                    <Text style={styles.sampleCardTitle} numberOfLines={1}>
+                      {s.label}
+                    </Text>
+                    <Text style={styles.sampleCardSub} numberOfLines={2}>
+                      {s.description}
+                    </Text>
+                  </PressableScale>
+                ))}
+              </View>
+              <Text style={styles.sampleCredit}>
+                샘플 사진 © {SAMPLE_SITES.map((s) => s.credit).join(' · ')}
+              </Text>
+            </View>
+          </FadeInUp>
+        ) : null}
 
         {/* 촬영 & 앨범 버튼 액션 카드로 리디자인 */}
         <FadeInUp delay={120}>
@@ -193,6 +256,23 @@ export function SiteAnalysisScreen() {
         <ErrorBanner message={error} />
 
         {result ? <AnalysisResult result={result} /> : null}
+
+        {/* 로그인이 없어도 수집·이용 고지는 제공한다(사진은 분석 즉시 폐기, 저장하지 않음). */}
+        <View style={styles.legalFooter}>
+          <Text style={styles.legalNotice}>
+            업로드한 사진은 분석에만 사용하고 서버에 저장하지 않습니다. 회원가입·로그인 없이
+            이용할 수 있습니다.
+          </Text>
+          <View style={styles.legalLinks}>
+            <Text style={styles.legalLink} onPress={() => openLegal('privacy')}>
+              개인정보처리방침
+            </Text>
+            <Text style={styles.legalDot}>·</Text>
+            <Text style={styles.legalLink} onPress={() => openLegal('terms')}>
+              이용약관
+            </Text>
+          </View>
+        </View>
       </ScrollView>
 
       {image && !result ? (
@@ -427,24 +507,124 @@ const styles = StyleSheet.create({
     lineHeight: 22,
     marginBottom: spacing.md,
   },
-  samplePillBtn: {
-    backgroundColor: colors.primary,
+  /* 로그인 없이 체험 고지 */
+  noLoginRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    borderRadius: 999,
-    paddingHorizontal: spacing.md,
-    paddingVertical: 10,
     gap: 6,
-    shadowColor: colors.primary,
-    shadowOpacity: 0.3,
-    shadowRadius: 10,
-    shadowOffset: { width: 0, height: 4 },
-    elevation: 3,
+    marginTop: spacing.sm,
+    borderTopColor: 'rgba(255,255,255,0.12)',
+    borderTopWidth: 1,
+    paddingTop: spacing.sm,
   },
-  samplePillBtnText: {
-    color: '#FFFFFF',
-    fontSize: font.body,
+  noLoginText: {
+    color: '#A7F3D0',
+    fontSize: 12,
+    fontWeight: '700',
+  },
+
+  /* 샘플 체험 섹션 */
+  sampleSection: {
+    backgroundColor: colors.background,
+    borderColor: colors.border,
+    borderWidth: 1,
+    borderRadius: radius.card,
+    padding: spacing.md,
+    marginBottom: spacing.md,
+  },
+  sampleHeadRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  sampleHeadTitle: {
+    color: colors.text,
+    fontSize: font.bodyLarge,
     fontWeight: '800',
+    flexShrink: 1,
+  },
+  sampleHeadSub: {
+    color: colors.textMuted,
+    fontSize: font.body - 2,
+    marginTop: 4,
+    marginBottom: spacing.sm,
+  },
+  sampleRow: {
+    flexDirection: 'row',
+    gap: spacing.xs,
+  },
+  sampleCard: {
+    flex: 1,
+  },
+  sampleThumbWrap: {
+    position: 'relative',
+    borderRadius: 10,
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  sampleThumb: {
+    width: '100%',
+    height: 78,
+  },
+  sampleThumbOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(15,23,42,0.72)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  sampleThumbOverlayText: {
+    color: '#FFFFFF',
+    fontSize: 12,
+    fontWeight: '800',
+  },
+  sampleCardTitle: {
+    color: colors.text,
+    fontSize: 13,
+    fontWeight: '800',
+    marginTop: 6,
+  },
+  sampleCardSub: {
+    color: colors.textMuted,
+    fontSize: 11,
+    lineHeight: 15,
+    marginTop: 2,
+  },
+  sampleCredit: {
+    color: colors.textMuted,
+    fontSize: 10,
+    marginTop: spacing.sm,
+  },
+
+  /* 법적 고지 푸터 */
+  legalFooter: {
+    marginTop: spacing.lg,
+    borderTopColor: colors.border,
+    borderTopWidth: 1,
+    paddingTop: spacing.md,
+    alignItems: 'center',
+  },
+  legalNotice: {
+    color: colors.textMuted,
+    fontSize: 12,
+    lineHeight: 18,
+    textAlign: 'center',
+  },
+  legalLinks: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginTop: spacing.sm,
+  },
+  legalLink: {
+    color: colors.primary,
+    fontSize: 12,
+    fontWeight: '700',
+    textDecorationLine: 'underline',
+  },
+  legalDot: {
+    color: colors.textMuted,
+    fontSize: 12,
   },
 
   /* 프리뷰 이미지 */

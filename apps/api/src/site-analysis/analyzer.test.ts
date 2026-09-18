@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   ClaudeSiteAnalyzer,
   MockSiteAnalyzer,
+  SelfHostedVlmAnalyzer,
   SiteAnalysisValidationError,
 } from './analyzer.js';
 
@@ -107,5 +108,106 @@ describe('ClaudeSiteAnalyzer', () => {
     expect(imageBlocks).toHaveLength(2);
     expect(imageBlocks[1].source.media_type).toBe('image/png');
     expect(textBlock.text).toContain('2장');
+  });
+});
+
+describe('SelfHostedVlmAnalyzer', () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  const okResponse = () => ({
+    ok: true,
+    json: async () => ({
+      choices: [
+        {
+          message: {
+            content:
+              '{"summary":"자체 GPU 분석","materials":[{"category":"HAZARD","name":"슬레이트","confidence":"MEDIUM","recyclable":false,"hazardous":true}],"demolitionSteps":[{"order":1,"title":"조사","description":"사전 조사"}],"hazards":["석면 의심"],"confidence":"MEDIUM"}',
+          },
+        },
+      ],
+    }),
+  });
+
+  it('OpenAI 호환 엔드포인트로 이미지를 보내고 결과를 파싱한다', async () => {
+    const fetchMock = vi.fn(okResponse);
+    vi.stubGlobal('fetch', fetchMock);
+
+    const analyzer = new SelfHostedVlmAnalyzer({
+      baseUrl: 'https://vlm.example.run.app/v1',
+      model: 'Qwen/Qwen2.5-VL-7B-Instruct',
+      timeoutMs: 5000,
+    });
+    const r = await analyzer.analyze({ imageBase64: IMG, mimeType: 'image/jpeg' });
+
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('https://vlm.example.run.app/v1/chat/completions');
+    expect(r.method).toBe('AI_VISION');
+    expect(r.materials[0]?.hazardous).toBe(true);
+
+    const body = JSON.parse(fetchMock.mock.calls[0]?.[1]?.body as string);
+    const content = body.messages[1].content;
+    expect(body.model).toBe('Qwen/Qwen2.5-VL-7B-Instruct');
+    expect(content.filter((c: { type: string }) => c.type === 'image_url')).toHaveLength(1);
+    expect(content[0].text).toContain('JSON');
+    // 공급자 전용 필드는 vLLM 이 거부할 수 있으므로 보내지 않는다.
+    expect(body.reasoning_effort).toBeUndefined();
+  });
+
+  it('baseUrl 끝의 슬래시를 중복 없이 처리한다', async () => {
+    const fetchMock = vi.fn(okResponse);
+    vi.stubGlobal('fetch', fetchMock);
+    const analyzer = new SelfHostedVlmAnalyzer({
+      baseUrl: 'https://vlm.example.run.app/v1/',
+      model: 'm',
+      timeoutMs: 5000,
+    });
+    await analyzer.analyze({ imageBase64: IMG });
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('https://vlm.example.run.app/v1/chat/completions');
+  });
+
+  it('apiKey 가 있으면 Authorization 헤더를 붙이고, 없으면 붙이지 않는다', async () => {
+    const withKey = vi.fn(okResponse);
+    vi.stubGlobal('fetch', withKey);
+    await new SelfHostedVlmAnalyzer({
+      baseUrl: 'https://vlm.example.run.app/v1',
+      model: 'm',
+      timeoutMs: 5000,
+      apiKey: 'secret',
+    }).analyze({ imageBase64: IMG });
+    expect((withKey.mock.calls[0]?.[1]?.headers as Record<string, string>).authorization).toBe(
+      'Bearer secret',
+    );
+
+    const noKey = vi.fn(okResponse);
+    vi.stubGlobal('fetch', noKey);
+    await new SelfHostedVlmAnalyzer({
+      baseUrl: 'https://vlm.example.run.app/v1',
+      model: 'm',
+      timeoutMs: 5000,
+    }).analyze({ imageBase64: IMG });
+    expect((noKey.mock.calls[0]?.[1]?.headers as Record<string, string>).authorization).toBeUndefined();
+  });
+
+  it('서버 오류면 예외를 던진다(라우터가 목으로 폴백)', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false, status: 503, json: async () => ({}) })));
+    const analyzer = new SelfHostedVlmAnalyzer({
+      baseUrl: 'https://vlm.example.run.app/v1',
+      model: 'm',
+      timeoutMs: 5000,
+    });
+    await expect(analyzer.analyze({ imageBase64: IMG })).rejects.toBeTruthy();
+  });
+
+  it('사진 검증은 GPU 호출 전에 수행된다', async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+    const analyzer = new SelfHostedVlmAnalyzer({
+      baseUrl: 'https://vlm.example.run.app/v1',
+      model: 'm',
+      timeoutMs: 5000,
+    });
+    await expect(analyzer.analyze({ imageBase64: 'short' })).rejects.toBeInstanceOf(
+      SiteAnalysisValidationError,
+    );
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });

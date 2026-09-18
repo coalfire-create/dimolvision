@@ -292,6 +292,69 @@ export class GroqSiteAnalyzer implements SiteAnalyzer {
   }
 }
 
+export interface SelfHostedVlmConfig {
+  /** vLLM OpenAI 호환 엔드포인트 (예: https://dimolvision-vlm-xxxx.run.app/v1). */
+  baseUrl: string;
+  model: string;
+  timeoutMs: number;
+  /** Cloud Run 을 공개로 두지 않을 때 쓰는 공유 토큰(Authorization: Bearer). */
+  apiKey?: string;
+}
+
+/**
+ * 자체 호스팅 VLM 분석(본격형) — Google Cloud Run GPU(NVIDIA L4) 위의 vLLM 서버를 호출한다.
+ * vLLM 이 OpenAI 호환 API 를 제공하므로 Groq 와 같은 요청 형태를 쓰되, 공급자 전용 필드
+ * (reasoning_effort 등)는 보내지 않는다. 키가 설정되면 호스팅 API 보다 우선한다 —
+ * 호출당 외부 과금이 없어 상용 운영의 단가·데이터 주권 문제를 해결하는 경로이기 때문이다.
+ */
+export class SelfHostedVlmAnalyzer implements SiteAnalyzer {
+  constructor(private readonly config: SelfHostedVlmConfig) {}
+
+  async analyze(input: AnalyzeSiteInput): Promise<SiteAnalysis> {
+    const images = assertValidImages(input);
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), this.config.timeoutMs);
+    const base = this.config.baseUrl.replace(/\/$/, '');
+    try {
+      const res = await fetch(`${base}/chat/completions`, {
+        method: 'POST',
+        signal: controller.signal,
+        headers: {
+          'content-type': 'application/json',
+          ...(this.config.apiKey ? { authorization: `Bearer ${this.config.apiKey}` } : {}),
+        },
+        body: JSON.stringify({
+          model: this.config.model,
+          response_format: { type: 'json_object' },
+          max_tokens: 1500,
+          temperature: 0,
+          messages: [
+            { role: 'system', content: SYSTEM_PROMPT },
+            {
+              role: 'user',
+              content: [
+                {
+                  type: 'text',
+                  text: buildUserInstruction(input.note, input.buildingStructure, images.length),
+                },
+                ...images.map((im) => ({
+                  type: 'image_url' as const,
+                  image_url: { url: `data:${im.mimeType};base64,${im.imageBase64}` },
+                })),
+              ],
+            },
+          ],
+        }),
+      });
+      if (!res.ok) throw new Error(`vlm ${res.status}`);
+      const body = (await res.json()) as { choices?: Array<{ message?: { content?: string } }> };
+      return parseVisionJson(body.choices?.[0]?.message?.content ?? '');
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+}
+
 /** 실제 Claude 비전 분석 — 실패 시 예외를 던진다(라우터가 목으로 폴백). */
 export class ClaudeSiteAnalyzer implements SiteAnalyzer {
   constructor(private readonly config: ClaudeAnalyzerConfig) {}

@@ -14,7 +14,7 @@ import {
   type ViewStyle,
 } from 'react-native';
 import { SUPPORT_PHONE, SUPPORT_PHONE_TEL_URL } from '@dimol/shared';
-import { statusColor, theme } from '../theme';
+import { CONTENT_MAX_WIDTH, statusColor, theme } from '../theme';
 import { PressableScale, usePressScale } from './motion';
 import brandmark from '../../assets/brandmark.png';
 import { AppIcon, type IconName } from './AppIcon';
@@ -190,7 +190,12 @@ export function SectionTitle({ children }: { children: React.ReactNode }) {
 
 // ── 하단 고정 CTA 바 (결제/접수 등 핵심 동작을 화면 하단에 고정)
 export function StickyFooter({ children }: { children: React.ReactNode }) {
-  return <View style={styles.stickyFooter}>{children}</View>;
+  // 넓은 화면에서 버튼이 화면 끝까지 늘어나지 않도록 본문과 같은 폭으로 묶는다.
+  return (
+    <View style={styles.stickyFooter}>
+      <View style={styles.stickyFooterInner}>{children}</View>
+    </View>
+  );
 }
 
 // ── 라벨-값 행 (상세 화면용)
@@ -376,6 +381,11 @@ const styles = StyleSheet.create({
     borderTopWidth: 1,
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.sm,
+  },
+  stickyFooterInner: {
+    width: '100%',
+    maxWidth: CONTENT_MAX_WIDTH,
+    alignSelf: 'center',
   },
   infoRow: {
     borderBottomColor: colors.border,

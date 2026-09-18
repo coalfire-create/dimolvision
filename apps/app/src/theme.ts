@@ -37,6 +37,12 @@ export const theme = {
   },
 } as const;
 
+/**
+ * 본문 최대 폭(px). 데스크톱에서 카드가 화면 끝까지 늘어나면 읽기 힘들고
+ * 완성도가 떨어져 보인다. 모바일 우선 레이아웃을 넓은 화면에서도 단정하게 유지한다.
+ */
+export const CONTENT_MAX_WIDTH = 720;
+
 /** 요청 상태 → 배지 색 (메인/보조/오류/무채색만 사용 — 색 남발 금지). */
 export function statusColor(status: string): { background: string; text: string } {
   switch (status) {

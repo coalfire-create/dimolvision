@@ -28,7 +28,7 @@ import { AppButton, Card, ErrorBanner, StickyFooter } from '../components/ui';
 import { FadeInUp, PressableScale } from '../components/motion';
 import { ScreenHeader } from '../navigation';
 import { SAMPLE_SITES, loadSampleBase64, sampleUri, type SampleSite } from '../lib/samples';
-import { theme } from '../theme';
+import { CONTENT_MAX_WIDTH, theme } from '../theme';
 
 import brandmark from '../../assets/brandmark.png';
 
@@ -303,6 +303,54 @@ export function SiteAnalysisScreen() {
           </View>
         </FadeInUp>
 
+        {/* 현장 사진이 없어도 바로 체험 — 실제 철거 현장 샘플을 같은 AI 파이프라인으로 분석 */}
+        {images.length === 0 ? (
+          <FadeInUp delay={100}>
+            <View style={styles.sampleSection}>
+              <View style={styles.sampleHeadRow}>
+                <AppIcon name="sparkles" size={18} color={theme.colors.primary} />
+                <Text style={styles.sampleHeadTitle}>사진이 없으신가요? 바로 체험해 보세요</Text>
+              </View>
+              <Text style={styles.sampleHeadSub}>
+                실제 철거 현장 사진입니다. 누르면 즉시 AI 분석이 실행됩니다.
+              </Text>
+              <View style={styles.sampleRow}>
+                {SAMPLE_SITES.map((s) => (
+                  <PressableScale
+                    key={s.id}
+                    style={styles.sampleCard}
+                    onPress={() => void runSample(s)}
+                    accessibilityRole="button"
+                    accessibilityLabel={`${s.label} 샘플 사진으로 AI 분석 실행`}
+                  >
+                    <View style={styles.sampleThumbWrap}>
+                      <Image
+                        source={{ uri: sampleUri(s) }}
+                        style={styles.sampleThumb}
+                        resizeMode="cover"
+                      />
+                      {sampleId === s.id ? (
+                        <View style={styles.sampleThumbOverlay}>
+                          <Text style={styles.sampleThumbOverlayText}>분석 중…</Text>
+                        </View>
+                      ) : null}
+                    </View>
+                    <Text style={styles.sampleCardTitle} numberOfLines={1}>
+                      {s.label}
+                    </Text>
+                    <Text style={styles.sampleCardSub} numberOfLines={2}>
+                      {s.description}
+                    </Text>
+                  </PressableScale>
+                ))}
+              </View>
+              <Text style={styles.sampleCredit}>
+                샘플 사진 © {SAMPLE_SITES.map((s) => s.credit).join(' · ')}
+              </Text>
+            </View>
+          </FadeInUp>
+        ) : null}
+
         {images.length > 0 ? (
           <FadeInUp>
             <View style={styles.previewContainer}>
@@ -355,61 +403,15 @@ export function SiteAnalysisScreen() {
               <View style={styles.iconCircle}>
                 <Image source={brandmark} style={styles.dropzoneLogo} resizeMode="contain" />
               </View>
-              <Text style={styles.dropzoneTitle}>철거 현장 사진을 업로드해 주세요</Text>
-              <Text style={styles.dropzoneSub}>
-                건물 내부, 지붕, 자재가 잘 보이게 찍으면{'\n'}소재 인식과 공정 가이드가 더욱 정확해집니다
-              </Text>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.dropzoneTitle}>직접 찍은 현장 사진도 분석해요</Text>
+                <Text style={styles.dropzoneSub}>
+                  건물 내부·지붕·자재가 잘 보이게 찍을수록 정확해집니다
+                </Text>
+              </View>
             </View>
           </FadeInUp>
         )}
-
-        {/* 현장 사진이 없어도 바로 체험 — 실제 철거 현장 샘플을 같은 AI 파이프라인으로 분석 */}
-        {images.length === 0 ? (
-          <FadeInUp delay={100}>
-            <View style={styles.sampleSection}>
-              <View style={styles.sampleHeadRow}>
-                <AppIcon name="sparkles" size={18} color={theme.colors.primary} />
-                <Text style={styles.sampleHeadTitle}>사진이 없으신가요? 바로 체험해 보세요</Text>
-              </View>
-              <Text style={styles.sampleHeadSub}>
-                실제 철거 현장 사진입니다. 누르면 즉시 AI 분석이 실행됩니다.
-              </Text>
-              <View style={styles.sampleRow}>
-                {SAMPLE_SITES.map((s) => (
-                  <PressableScale
-                    key={s.id}
-                    style={styles.sampleCard}
-                    onPress={() => void runSample(s)}
-                    accessibilityRole="button"
-                    accessibilityLabel={`${s.label} 샘플 사진으로 AI 분석 실행`}
-                  >
-                    <View style={styles.sampleThumbWrap}>
-                      <Image
-                        source={{ uri: sampleUri(s) }}
-                        style={styles.sampleThumb}
-                        resizeMode="cover"
-                      />
-                      {sampleId === s.id ? (
-                        <View style={styles.sampleThumbOverlay}>
-                          <Text style={styles.sampleThumbOverlayText}>분석 중…</Text>
-                        </View>
-                      ) : null}
-                    </View>
-                    <Text style={styles.sampleCardTitle} numberOfLines={1}>
-                      {s.label}
-                    </Text>
-                    <Text style={styles.sampleCardSub} numberOfLines={2}>
-                      {s.description}
-                    </Text>
-                  </PressableScale>
-                ))}
-              </View>
-              <Text style={styles.sampleCredit}>
-                샘플 사진 © {SAMPLE_SITES.map((s) => s.credit).join(' · ')}
-              </Text>
-            </View>
-          </FadeInUp>
-        ) : null}
 
         {/* 촬영 & 앨범 버튼 액션 카드로 리디자인 */}
         <FadeInUp delay={120}>
@@ -769,7 +771,14 @@ const { colors, font, spacing, radius } = theme;
 
 const styles = StyleSheet.create({
   screen: { backgroundColor: colors.background, flex: 1 },
-  content: { padding: spacing.md, paddingBottom: spacing.lg },
+  content: {
+    padding: spacing.md,
+    paddingBottom: spacing.lg,
+    // 넓은 화면에서 카드가 끝까지 늘어나지 않게 — 모바일 레이아웃을 그대로 가운데 정렬한다.
+    width: '100%',
+    maxWidth: CONTENT_MAX_WIDTH,
+    alignSelf: 'center',
+  },
   
   /* 히어로 AI 카드 */
   heroCard: {
@@ -846,19 +855,21 @@ const styles = StyleSheet.create({
 
   /* 업로드 드롭존 */
   dropzone: {
+    flexDirection: 'row',
     alignItems: 'center',
+    gap: spacing.sm,
     backgroundColor: '#F8FAFC',
     borderRadius: radius.card,
-    borderWidth: 2,
+    borderWidth: 1.5,
     borderColor: '#CBD5E1',
     borderStyle: 'dashed',
-    padding: spacing.lg,
+    padding: spacing.md,
     marginBottom: spacing.md,
   },
   iconCircle: {
-    width: 68,
-    height: 68,
-    borderRadius: 34,
+    width: 48,
+    height: 48,
+    borderRadius: 24,
     backgroundColor: '#EFF6FF',
     alignItems: 'center',
     justifyContent: 'center',
@@ -867,22 +878,19 @@ const styles = StyleSheet.create({
     borderColor: '#DBEAFE',
   },
   dropzoneLogo: {
-    width: 44,
-    height: 44,
+    width: 30,
+    height: 30,
   },
   dropzoneTitle: {
     color: colors.text,
-    fontSize: font.bodyLarge,
+    fontSize: font.body,
     fontWeight: '800',
-    textAlign: 'center',
-    marginBottom: 4,
+    marginBottom: 2,
   },
   dropzoneSub: {
     color: colors.textMuted,
-    fontSize: font.body - 2,
-    textAlign: 'center',
-    lineHeight: 22,
-    marginBottom: spacing.md,
+    fontSize: 13,
+    lineHeight: 19,
   },
   /* 로그인 없이 체험 고지 */
   noLoginRow: {
@@ -942,7 +950,7 @@ const styles = StyleSheet.create({
   },
   sampleThumb: {
     width: '100%',
-    height: 78,
+    aspectRatio: 4 / 3,
   },
   sampleThumbOverlay: {
     ...StyleSheet.absoluteFillObject,

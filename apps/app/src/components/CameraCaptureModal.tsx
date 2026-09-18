@@ -110,12 +110,21 @@ export function CameraCaptureModal({
         {permissionPending ? (
           <View style={styles.centerFill}>
             <ActivityIndicator size="large" color="#FFFFFF" />
+            <Text style={styles.permSub}>카메라를 준비하고 있어요…</Text>
+            {/* 카메라가 없는 데스크톱 등에서는 권한 응답이 오지 않을 수 있다.
+                빠져나갈 길이 없으면 막다른 화면이 되므로 항상 닫기를 둔다. */}
+            <Pressable style={styles.permClose} onPress={handleClose} accessibilityRole="button">
+              <Text style={styles.permCloseText}>닫기</Text>
+            </Pressable>
           </View>
         ) : permissionDenied ? (
           <View style={styles.centerFill}>
             <AppIcon name="camera" size={40} color="#FFFFFF" />
             <Text style={styles.permTitle}>카메라 권한이 필요해요</Text>
-            <Text style={styles.permSub}>현장 사진을 촬영하려면 카메라 사용을 허용해 주세요.</Text>
+            <Text style={styles.permSub}>
+              현장 사진을 촬영하려면 카메라 사용을 허용해 주세요.{'\n'}
+              카메라가 없는 PC 라면 닫기 후 “앨범에서 선택” 또는 샘플 사진을 이용하세요.
+            </Text>
             <Pressable style={styles.permBtn} onPress={requestPermission} accessibilityRole="button">
               <Text style={styles.permBtnText}>카메라 허용하기</Text>
             </Pressable>

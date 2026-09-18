@@ -18,11 +18,21 @@ import type { VolumeEstimator } from '../estimation/provider.js';
  *
  * estimator 는 사진 기반 자동 채움(waste-items)에서 총 중량 추정에 쓴다(디몰비전 VLM 연동 시 교체).
  */
+export interface SiteAnalysisRouterOptions {
+  /** 공급자 1곳당 시도 횟수(1 = 재시도 없음). 기본 2 — 일시적 429/503 을 한 번 더 받아준다. */
+  attemptsPerAnalyzer?: number;
+  /** 재시도 전 대기(ms). 기본 700. */
+  retryDelayMs?: number;
+}
+
 export function createSiteAnalysisRouter(
   chain: SiteAnalyzer[],
   estimator?: VolumeEstimator,
+  options: SiteAnalysisRouterOptions = {},
 ): Router {
   if (chain.length === 0) throw new Error('분석기 체인이 비어 있습니다.');
+  const attempts = Math.max(1, options.attemptsPerAnalyzer ?? 2);
+  const retryDelayMs = options.retryDelayMs ?? 700;
   const router = Router();
 
   function parseInput(body: Record<string, unknown>): AnalyzeSiteInput {
@@ -55,15 +65,24 @@ export function createSiteAnalysisRouter(
   async function analyzeWithFallback(input: AnalyzeSiteInput): Promise<SiteAnalysis> {
     let lastError: unknown;
     for (let i = 0; i < chain.length; i += 1) {
-      try {
-        return await chain[i]!.analyze(input);
-      } catch (err) {
-        if (err instanceof SiteAnalysisValidationError) throw err;
-        lastError = err;
-        console.error(
-          `[site-analysis] 분석 폴백 ${i + 1}/${chain.length}`,
-          err instanceof Error ? err.message : 'error',
-        );
+      // 같은 공급자를 몇 번 시도한다. 실제 관측된 실패가 429(레이트리밋)·503(과부하) 처럼
+      // 잠깐 뒤엔 풀리는 종류라, 곧장 다음으로 넘기기보다 한 번 더 두드리는 편이 낫다.
+      // 목(마지막 항목)은 실패하지 않으므로 재시도 대상이 아니다.
+      for (let attempt = 1; attempt <= attempts; attempt += 1) {
+        try {
+          return await chain[i]!.analyze(input);
+        } catch (err) {
+          if (err instanceof SiteAnalysisValidationError) throw err;
+          lastError = err;
+          const message = err instanceof Error ? err.message : 'error';
+          console.error(
+            `[site-analysis] 분석 실패 ${i + 1}/${chain.length} (시도 ${attempt}/${attempts})`,
+            message,
+          );
+          if (attempt < attempts) {
+            await new Promise((resolve) => setTimeout(resolve, retryDelayMs));
+          }
+        }
       }
     }
     throw lastError;

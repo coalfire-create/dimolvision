@@ -11,13 +11,17 @@ import { createSiteAnalysisRouter } from './site-analysis.js';
 
 const IMG = 'A'.repeat(200);
 
-/** 지정한 횟수만큼 실패하거나 항상 실패하는 가짜 분석기. */
-function analyzer(behavior: 'ok' | 'fail', summary = 'ok'): SiteAnalyzer & { calls: number } {
+/** 가짜 분석기. failTimes 만큼 실패한 뒤 성공한다('fail' 은 항상 실패). */
+function analyzer(
+  behavior: 'ok' | 'fail' | number,
+  summary = 'ok',
+): SiteAnalyzer & { calls: number } {
   const a = {
     calls: 0,
     async analyze(_input: AnalyzeSiteInput): Promise<SiteAnalysis> {
       a.calls += 1;
       if (behavior === 'fail') throw new Error('upstream 503');
+      if (typeof behavior === 'number' && a.calls <= behavior) throw new Error('upstream 429');
       return { summary, materials: [], demolitionSteps: [], hazards: [], method: 'AI_VISION', confidence: 'MEDIUM', disclaimer: 'd', analyzedAt: new Date().toISOString() };
     },
   };
@@ -25,10 +29,10 @@ function analyzer(behavior: 'ok' | 'fail', summary = 'ok'): SiteAnalyzer & { cal
 }
 
 /** 라우터를 붙인 앱에 analyze 요청을 보내고 응답을 돌려준다. */
-async function post(chain: SiteAnalyzer[], body: unknown) {
+async function post(chain: SiteAnalyzer[], body: unknown, attemptsPerAnalyzer = 1) {
   const app = express();
   app.use(express.json({ limit: '5mb' }));
-  app.use('/api', createSiteAnalysisRouter(chain));
+  app.use('/api', createSiteAnalysisRouter(chain, undefined, { attemptsPerAnalyzer, retryDelayMs: 1 }));
   const server = app.listen(0);
   const port = (server.address() as { port: number }).port;
   try {
@@ -84,5 +88,23 @@ describe('분석기 체인 폴백', () => {
 
   it('빈 체인은 만들 수 없다', () => {
     expect(() => createSiteAnalysisRouter([])).toThrow();
+  });
+
+  it('일시적 오류(429/503)는 같은 공급자를 한 번 더 시도해 살려낸다', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const flaky = analyzer(1, '재시도로 성공'); // 첫 호출만 실패
+    const res = await post([flaky, new MockSiteAnalyzer()], { imageBase64: IMG }, 2);
+    expect(flaky.calls).toBe(2);
+    expect(res.body.summary).toBe('재시도로 성공');
+    expect(res.body.method).toBe('AI_VISION');
+  });
+
+  it('재시도해도 계속 실패하면 다음 공급자로 넘어간다', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const dead = analyzer('fail');
+    const backup = analyzer('ok', '백업이 처리');
+    const res = await post([dead, backup, new MockSiteAnalyzer()], { imageBase64: IMG }, 2);
+    expect(dead.calls).toBe(2); // 시도 2회 후 포기
+    expect(res.body.summary).toBe('백업이 처리');
   });
 });

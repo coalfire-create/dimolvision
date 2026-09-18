@@ -28,6 +28,9 @@ import brandmark from '../../assets/brandmark.png';
 
 const CONFIDENCE_LABELS: Record<string, string> = { LOW: '참고', MEDIUM: '보통', HIGH: '높음' };
 
+/** 한 번에 종합 분석할 수 있는 최대 장수(서버 MAX_ANALYZE_IMAGES 와 맞춘다). */
+const MAX_PHOTOS = 6;
+
 /**
  * 분석은 보통 10~20초 걸린다. 스피너만 돌면 멈춘 것처럼 보이므로,
  * 실제 파이프라인 단계를 순서대로 보여주고 경과 시간을 함께 노출한다.
@@ -79,7 +82,11 @@ function mimeFromUri(uri: string): string {
 }
 
 export function SiteAnalysisScreen() {
-  const [image, setImage] = useState<PickedImage | null>(null);
+  /**
+   * 현장 사진들. 가이드 촬영은 전경·근접·지붕·위험부위를 순서대로 모으고,
+   * API 는 여러 장을 한 번에 종합 분석한다(한 장에서만 보이는 소재도 놓치지 않도록).
+   */
+  const [images, setImages] = useState<PickedImage[]>([]);
   const [result, setResult] = useState<SiteAnalysis | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -91,23 +98,29 @@ export function SiteAnalysisScreen() {
   const [structure, setStructure] = useState<BuildingStructure | null>(null);
   const [estimate, setEstimate] = useState<VolumeEstimate | null>(null);
 
-  function applyAsset(asset: ImagePicker.ImagePickerAsset) {
-    if (!asset.base64) {
+  function applyAssets(assets: ImagePicker.ImagePickerAsset[]) {
+    const picked = assets
+      .filter((a) => a.base64)
+      .map((a) => ({
+        base64: a.base64!,
+        mimeType: a.mimeType ?? mimeFromUri(a.uri),
+        uri: a.uri,
+      }));
+    if (picked.length === 0) {
       setError('사진을 불러오지 못했어요. 다시 시도해 주세요.');
       return;
     }
     setResult(null);
     setError(null);
-    setImage({ base64: asset.base64, mimeType: asset.mimeType ?? mimeFromUri(asset.uri), uri: asset.uri });
+    setImages((prev) => [...prev, ...picked].slice(0, MAX_PHOTOS));
   }
 
-  // 커스텀 카메라(가이드 오버레이)에서 촬영 완료 시 — 대표로 첫 장을 미리보기로 사용
+  // 가이드 촬영으로 모은 사진을 전부 받는다 — 순서(전경·근접·지붕·위험부위)가 분석 품질을 만든다.
   function handleCameraCapture(photos: CapturedPhoto[]) {
-    const first = photos[0];
-    if (!first) return;
+    if (photos.length === 0) return;
     setResult(null);
     setError(null);
-    setImage(first);
+    setImages((prev) => [...prev, ...photos].slice(0, MAX_PHOTOS));
     setCameraOpen(false);
   }
 
@@ -116,8 +129,10 @@ export function SiteAnalysisScreen() {
       mediaTypes: ImagePicker.MediaTypeOptions.Images,
       base64: true,
       quality: 0.5,
+      allowsMultipleSelection: true,
+      selectionLimit: MAX_PHOTOS,
     });
-    if (!res.canceled && res.assets[0]) applyAsset(res.assets[0]);
+    if (!res.canceled && res.assets.length > 0) applyAssets(res.assets);
   }
 
   function takePhoto() {
@@ -135,16 +150,16 @@ export function SiteAnalysisScreen() {
    * 사진만 있으면 소재·공정만, 연면적까지 있으면 물량 추정(톤·트럭 대수)까지 한 번에.
    * 면적은 선택 입력이라 없어도 체험이 막히지 않는다.
    */
-  async function runAnalysis(img: PickedImage) {
+  async function runAnalysis(shots: PickedImage[]) {
+    const payload = shots.map((i) => ({ imageBase64: i.base64, mimeType: i.mimeType }));
     const area = floorAreaM2();
     if (area === undefined) {
       setEstimate(null);
-      setResult(await analyzeSite({ imageBase64: img.base64, mimeType: img.mimeType }));
+      setResult(await analyzeSite({ images: payload }));
       return;
     }
     const r = await analyzeSiteWasteItems({
-      imageBase64: img.base64,
-      mimeType: img.mimeType,
+      images: payload,
       floorAreaM2: area,
       ...(structure ? { structure } : {}),
     });
@@ -153,11 +168,11 @@ export function SiteAnalysisScreen() {
   }
 
   async function analyze() {
-    if (!image) return;
+    if (images.length === 0) return;
     setError(null);
     setLoading(true);
     try {
-      await runAnalysis(image);
+      await runAnalysis(images);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : '분석에 실패했어요. 다시 시도해 주세요.');
     } finally {
@@ -176,8 +191,8 @@ export function SiteAnalysisScreen() {
     setLoading(true);
     try {
       const picked = await loadSampleBase64(sample);
-      setImage(picked);
-      await runAnalysis(picked);
+      setImages([picked]);
+      await runAnalysis([picked]);
     } catch (err) {
       setError(
         err instanceof ApiError ? err.message : '샘플 분석에 실패했어요. 다시 시도해 주세요.',
@@ -232,15 +247,50 @@ export function SiteAnalysisScreen() {
           </View>
         </FadeInUp>
 
-        {image ? (
+        {images.length > 0 ? (
           <FadeInUp>
             <View style={styles.previewContainer}>
-              <Image source={{ uri: image.uri }} style={styles.preview} resizeMode="cover" />
-              <PressableScale style={styles.repickChip} onPress={() => setImage(null)}>
+              <Image source={{ uri: images[0]!.uri }} style={styles.preview} resizeMode="cover" />
+              {images.length > 1 ? (
+                <View style={styles.multiBadge}>
+                  <AppIcon name="sparkles" size={13} color="#FFFFFF" />
+                  <Text style={styles.multiBadgeText}>{images.length}장 종합 분석</Text>
+                </View>
+              ) : null}
+              <PressableScale style={styles.repickChip} onPress={() => setImages([])}>
                 <AppIcon name="recycle" size={16} color="#FFFFFF" />
                 <Text style={styles.repickChipText}>다시 선택</Text>
               </PressableScale>
             </View>
+
+            {images.length > 1 ? (
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={styles.thumbStrip}
+              >
+                {images.map((img, i) => (
+                  <View key={`${img.uri}-${i}`} style={styles.thumbWrap}>
+                    <Image source={{ uri: img.uri }} style={styles.thumb} resizeMode="cover" />
+                    <PressableScale
+                      style={styles.thumbRemove}
+                      onPress={() => setImages((prev) => prev.filter((_, k) => k !== i))}
+                      accessibilityRole="button"
+                      accessibilityLabel={`${i + 1}번째 사진 빼기`}
+                    >
+                      <Text style={styles.thumbRemoveText}>✕</Text>
+                    </PressableScale>
+                  </View>
+                ))}
+              </ScrollView>
+            ) : null}
+
+            {images.length < MAX_PHOTOS ? (
+              <Text style={styles.addMoreHint}>
+                각도를 바꿔 더 찍으면 정확도가 올라가요 — 전경 · 벽/바닥 근접 · 지붕 · 위험 부위
+                (최대 {MAX_PHOTOS}장)
+              </Text>
+            ) : null}
           </FadeInUp>
         ) : (
           /* 모던 AI 드롭존 영역 */
@@ -258,7 +308,7 @@ export function SiteAnalysisScreen() {
         )}
 
         {/* 현장 사진이 없어도 바로 체험 — 실제 철거 현장 샘플을 같은 AI 파이프라인으로 분석 */}
-        {!image ? (
+        {images.length === 0 ? (
           <FadeInUp delay={100}>
             <View style={styles.sampleSection}>
               <View style={styles.sampleHeadRow}>
@@ -312,8 +362,10 @@ export function SiteAnalysisScreen() {
               <View style={styles.actionIconCircle}>
                 <AppIcon name="camera" size={26} color={theme.colors.primary} />
               </View>
-              <Text style={styles.actionCardTitle}>카메라 촬영</Text>
-              <Text style={styles.actionCardSub}>현장에서 직접 촬영</Text>
+              <Text style={styles.actionCardTitle}>
+                {images.length > 0 ? '사진 추가 촬영' : '카메라 촬영'}
+              </Text>
+              <Text style={styles.actionCardSub}>가이드 따라 여러 장</Text>
             </PressableScale>
             
             <View style={{ width: theme.spacing.sm }} />
@@ -323,12 +375,12 @@ export function SiteAnalysisScreen() {
                 <AppIcon name="document" size={26} color={theme.colors.primary} />
               </View>
               <Text style={styles.actionCardTitle}>앨범에서 선택</Text>
-              <Text style={styles.actionCardSub}>저장된 사진 불러오기</Text>
+              <Text style={styles.actionCardSub}>여러 장 선택 가능</Text>
             </PressableScale>
           </View>
         </FadeInUp>
 
-        {image && !loading ? (
+        {images.length > 0 && !loading ? (
           <FadeInUp delay={60}>
             <View style={styles.areaCard}>
               <Text style={styles.areaTitle}>연면적을 알면 물량까지 추정해 드려요</Text>
@@ -397,10 +449,16 @@ export function SiteAnalysisScreen() {
         </View>
       </ScrollView>
 
-      {image ? (
+      {images.length > 0 ? (
         <StickyFooter>
           <AppButton
-            label={result ? '면적 반영해 다시 분석' : '이 사진 분석하기'}
+            label={
+              result
+                ? '면적 반영해 다시 분석'
+                : images.length > 1
+                  ? `${images.length}장 종합 분석하기`
+                  : '이 사진 분석하기'
+            }
             onPress={analyze}
             loading={loading}
           />
@@ -812,6 +870,47 @@ const styles = StyleSheet.create({
     color: colors.textMuted,
     fontSize: 10,
     marginTop: spacing.sm,
+  },
+
+  multiBadge: {
+    position: 'absolute',
+    left: 12,
+    top: 12,
+    backgroundColor: 'rgba(37,99,235,0.92)',
+    borderRadius: 999,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+  },
+  multiBadgeText: { color: '#FFFFFF', fontSize: 12, fontWeight: '800' },
+  thumbStrip: { gap: spacing.xs, paddingBottom: spacing.xs },
+  thumbWrap: { position: 'relative' },
+  thumb: {
+    width: 64,
+    height: 64,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  thumbRemove: {
+    position: 'absolute',
+    right: -6,
+    top: -6,
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    backgroundColor: 'rgba(15,23,42,0.88)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  thumbRemoveText: { color: '#FFFFFF', fontSize: 12, fontWeight: '800' },
+  addMoreHint: {
+    color: colors.textMuted,
+    fontSize: 12,
+    lineHeight: 18,
+    marginBottom: spacing.md,
   },
 
   /* 연면적 입력 카드 */

@@ -1,5 +1,16 @@
 import React, { useEffect, useState } from 'react';
-import { ActivityIndicator, Image, Linking, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import {
+  ActivityIndicator,
+  Image,
+  Linking,
+  Platform,
+  ScrollView,
+  Share,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+} from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import {
   BUILDING_STRUCTURE_LABELS,
@@ -59,6 +70,51 @@ function AnalysisProgress() {
       </View>
     </View>
   );
+}
+
+/**
+ * 분석 결과를 그대로 옮겨 쓸 수 있는 텍스트로 만든다.
+ * 현장에서는 이 내용을 철거 업체나 담당자에게 메시지로 보내는 일이 실제 업무라,
+ * 화면에서 눈으로 읽는 것만으로는 끝나지 않는다.
+ */
+function buildReportText(result: SiteAnalysis, estimate: VolumeEstimate | null): string {
+  const lines: string[] = ['[디몰비전 현장 분석 리포트]', '', result.summary, ''];
+
+  if (estimate) {
+    lines.push(
+      '■ 물량 추정',
+      `- 예상 폐기물: ${estimate.estimatedTons}톤 (범위 ${estimate.rangeMinTons}~${estimate.rangeMaxTons}톤)`,
+      `- 연면적: ${Math.round(estimate.floorAreaM2).toLocaleString('ko-KR')}㎡`,
+      `- 운반 차량: ${estimate.truckLoads.map((t) => `${t.capacityTons}톤 ${t.count}대`).join(' / ')}`,
+      '',
+    );
+  }
+
+  lines.push('■ 구성 소재');
+  for (const m of result.materials) {
+    const tag = m.hazardous ? '위험물' : m.recyclable ? '재활용 가능' : '일반 처리';
+    const kg = m.estimatedKg ? ` · 약 ${formatWeight(m.estimatedKg)}` : '';
+    lines.push(`- ${m.name} (${tag}${kg})${m.note ? ` — ${m.note}` : ''}`);
+  }
+
+  lines.push('', '■ 권장 철거 공정');
+  for (const step of result.demolitionSteps) {
+    lines.push(`${step.order}. ${step.title} — ${step.description}`);
+    if (step.caution) lines.push(`   ※ 주의: ${step.caution}`);
+  }
+
+  if (result.hazards.length > 0) {
+    lines.push('', '■ 안전 위험요소');
+    for (const h of result.hazards) lines.push(`- ${h}`);
+  }
+
+  lines.push(
+    '',
+    result.disclaimer,
+    '',
+    `분석: 디몰비전 (${result.method === 'AI_VISION' ? 'AI 실시간 분석' : '시연용 샘플'}) · https://dimolvision.vercel.app`,
+  );
+  return lines.join('\n');
 }
 
 /** kg 을 읽기 쉬운 단위로. 1톤 이상은 톤으로 끊는다(현장에서 쓰는 단위). */
@@ -515,6 +571,49 @@ function MaterialRow({ m, maxKg }: { m: DetectedMaterial; maxKg: number }) {
   );
 }
 
+/**
+ * 리포트 내보내기. 웹은 클립보드, 네이티브는 기본 공유 시트 — 새 의존성 없이
+ * 각 플랫폼이 이미 가진 수단만 쓴다.
+ */
+function ShareReportButton({
+  result,
+  estimate,
+}: {
+  result: SiteAnalysis;
+  estimate: VolumeEstimate | null;
+}) {
+  const [copied, setCopied] = useState(false);
+
+  async function handleShare() {
+    const text = buildReportText(result, estimate);
+    try {
+      if (Platform.OS === 'web') {
+        await navigator.clipboard.writeText(text);
+        setCopied(true);
+        setTimeout(() => setCopied(false), 2400);
+      } else {
+        await Share.share({ message: text });
+      }
+    } catch {
+      // 클립보드 권한 거부 등 — 조용히 무시한다(결과 화면은 그대로 남아 있다).
+    }
+  }
+
+  return (
+    <PressableScale
+      style={styles.shareBtn}
+      onPress={() => void handleShare()}
+      accessibilityRole="button"
+      accessibilityLabel="분석 리포트 내보내기"
+    >
+      <AppIcon name="document" size={16} color={theme.colors.primary} />
+      <Text style={styles.shareBtnText}>
+        {copied ? '복사했어요 — 붙여넣기 하세요' : Platform.OS === 'web' ? '리포트 복사' : '리포트 공유'}
+      </Text>
+    </PressableScale>
+  );
+}
+
 /** 연면적 기반 물량 추정 — 현장에서 실제로 필요한 "몇 톤, 트럭 몇 대"를 보여준다. */
 function VolumeEstimateCard({ estimate }: { estimate: VolumeEstimate }) {
   return (
@@ -658,6 +757,8 @@ function AnalysisResult({ result, estimate }: { result: SiteAnalysis; estimate: 
           </View>
         </FadeInUp>
       ) : null}
+
+      <ShareReportButton result={result} estimate={estimate} />
 
       <Text style={styles.disclaimer}>{result.disclaimer}</Text>
     </View>
@@ -871,6 +972,20 @@ const styles = StyleSheet.create({
     fontSize: 10,
     marginTop: spacing.sm,
   },
+
+  shareBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    marginTop: spacing.md,
+    paddingVertical: 14,
+    borderRadius: radius.button,
+    borderWidth: 1.5,
+    borderColor: colors.primary,
+    backgroundColor: colors.primarySoft,
+  },
+  shareBtnText: { color: colors.primary, fontSize: font.body, fontWeight: '800' },
 
   multiBadge: {
     position: 'absolute',

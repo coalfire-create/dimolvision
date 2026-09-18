@@ -67,6 +67,27 @@ export function createApp() {
     res.json({ ok: true, provider: activeVisionProvider() });
   });
 
+  // [임시 진단] 이 계정이 실제로 쓸 수 있는 Groq 모델 목록. 모델 404 원인 확인용 — 확인 후 제거한다.
+  app.get('/api/_diag/models', async (_req, res) => {
+    if (!env.ai.groqApiKey) {
+      res.json({ error: 'no groq key' });
+      return;
+    }
+    try {
+      const r = await fetch('https://api.groq.com/openai/v1/models', {
+        headers: { authorization: `Bearer ${env.ai.groqApiKey}` },
+      });
+      const body = (await r.json()) as { data?: Array<{ id?: string }> };
+      res.json({
+        status: r.status,
+        configured: env.ai.groqModel,
+        models: (body.data ?? []).map((m) => m.id).sort(),
+      });
+    } catch (err) {
+      res.json({ error: err instanceof Error ? err.message : 'failed' });
+    }
+  });
+
   app.use('/api', createSiteAnalysisRouter(primary, mock, new HeuristicVolumeEstimator()));
 
   return app;

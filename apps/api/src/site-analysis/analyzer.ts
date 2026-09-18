@@ -15,6 +15,30 @@ import {
 
 export class SiteAnalysisValidationError extends Error {}
 
+/**
+ * 비전 공급자 호출 실패. HTTP 상태를 보존해 체인이 대응을 나눌 수 있게 한다.
+ * 429(레이트리밋)는 같은 공급자를 다시 두드려봐야 한도만 더 태우므로 즉시 다음으로 넘기고,
+ * 5xx(일시적 서버 오류)만 재시도할 가치가 있다 — 실측에서 두 실패의 성격이 달랐다.
+ */
+export class VisionProviderError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+  ) {
+    super(message);
+  }
+
+  /** 레이트리밋 — 재시도해도 같은 창(window)에서는 풀리지 않는다. */
+  get isRateLimited(): boolean {
+    return this.status === 429;
+  }
+
+  /** 잠깐 뒤 풀릴 수 있는 서버측 오류. */
+  get isRetryable(): boolean {
+    return this.status >= 500;
+  }
+}
+
 /** 한 장의 현장 사진. */
 export interface AnalyzeImage {
   imageBase64: string;
@@ -234,7 +258,7 @@ export class GeminiSiteAnalyzer implements SiteAnalyzer {
           }),
         },
       );
-      if (!res.ok) throw new Error(`gemini ${res.status}`);
+      if (!res.ok) throw new VisionProviderError(`gemini ${res.status}`, res.status);
       const body = (await res.json()) as {
         candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
       };
@@ -299,7 +323,7 @@ export class GroqSiteAnalyzer implements SiteAnalyzer {
           ],
         }),
       });
-      if (!res.ok) throw new Error(`groq ${res.status}`);
+      if (!res.ok) throw new VisionProviderError(`groq ${res.status}`, res.status);
       const body = (await res.json()) as { choices?: Array<{ message?: { content?: string } }> };
       return parseVisionJson(body.choices?.[0]?.message?.content ?? '');
     } finally {
@@ -362,7 +386,7 @@ export class SelfHostedVlmAnalyzer implements SiteAnalyzer {
           ],
         }),
       });
-      if (!res.ok) throw new Error(`vlm ${res.status}`);
+      if (!res.ok) throw new VisionProviderError(`vlm ${res.status}`, res.status);
       const body = (await res.json()) as { choices?: Array<{ message?: { content?: string } }> };
       return parseVisionJson(body.choices?.[0]?.message?.content ?? '');
     } finally {
@@ -407,7 +431,7 @@ export class ClaudeSiteAnalyzer implements SiteAnalyzer {
           ],
         }),
       });
-      if (!res.ok) throw new Error(`anthropic ${res.status}`);
+      if (!res.ok) throw new VisionProviderError(`anthropic ${res.status}`, res.status);
       const body = (await res.json()) as { content?: Array<{ type: string; text?: string }> };
       text = body.content?.find((c) => c.type === 'text')?.text ?? '';
     } finally {

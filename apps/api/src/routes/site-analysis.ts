@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { siteAnalysisToWasteItems, type SiteAnalysis } from '@dimol/shared';
 import {
   SiteAnalysisValidationError,
+  VisionProviderError,
   type AnalyzeSiteInput,
   type SiteAnalyzer,
 } from '../site-analysis/analyzer.js';
@@ -79,6 +80,9 @@ export function createSiteAnalysisRouter(
             `[site-analysis] 분석 실패 ${i + 1}/${chain.length} (시도 ${attempt}/${attempts})`,
             message,
           );
+          // 레이트리밋이면 같은 공급자를 다시 두드려도 같은 창에서는 풀리지 않는다.
+          // 한도만 더 태우고 응답만 느려지므로 즉시 다음 공급자로 넘긴다.
+          if (err instanceof VisionProviderError && err.isRateLimited) break;
           if (attempt < attempts) {
             await new Promise((resolve) => setTimeout(resolve, retryDelayMs));
           }

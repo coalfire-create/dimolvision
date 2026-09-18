@@ -4,6 +4,7 @@ import type { SiteAnalysis } from '@dimol/shared';
 import {
   MockSiteAnalyzer,
   SiteAnalysisValidationError,
+  VisionProviderError,
   type AnalyzeSiteInput,
   type SiteAnalyzer,
 } from '../site-analysis/analyzer.js';
@@ -106,5 +107,35 @@ describe('분석기 체인 폴백', () => {
     const res = await post([dead, backup, new MockSiteAnalyzer()], { imageBase64: IMG }, 2);
     expect(dead.calls).toBe(2); // 시도 2회 후 포기
     expect(res.body.summary).toBe('백업이 처리');
+  });
+
+  it('레이트리밋(429)은 재시도하지 않고 즉시 다음 공급자로 넘긴다', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    let limitedCalls = 0;
+    const limited: SiteAnalyzer = {
+      async analyze() {
+        limitedCalls += 1;
+        throw new VisionProviderError('groq 429', 429);
+      },
+    };
+    const backup = analyzer('ok', '2차가 처리');
+    const res = await post([limited, backup, new MockSiteAnalyzer()], { imageBase64: IMG }, 2);
+    expect(limitedCalls).toBe(1); // 재시도하지 않는다 — 한도만 더 태우므로
+    expect(res.body.summary).toBe('2차가 처리');
+  });
+
+  it('서버 오류(5xx)는 같은 공급자를 한 번 더 시도한다', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    let calls = 0;
+    const flaky: SiteAnalyzer = {
+      async analyze() {
+        calls += 1;
+        if (calls === 1) throw new VisionProviderError('gemini 503', 503);
+        return { summary: '재시도로 성공', materials: [], demolitionSteps: [], hazards: [], method: 'AI_VISION', confidence: 'MEDIUM', disclaimer: 'd', analyzedAt: new Date().toISOString() };
+      },
+    };
+    const res = await post([flaky, new MockSiteAnalyzer()], { imageBase64: IMG }, 2);
+    expect(calls).toBe(2);
+    expect(res.body.summary).toBe('재시도로 성공');
   });
 });

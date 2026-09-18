@@ -46,13 +46,10 @@ function buildAnalyzerChain(mock: SiteAnalyzer): SiteAnalyzer[] {
       }),
     );
   }
-  if (env.ai.geminiApiKey) {
+  // 키 하나당 분석기 하나. 무료 티어 한도가 프로젝트 단위라 키를 늘리면 처리량이 늘어난다.
+  for (const apiKey of env.ai.geminiApiKeys) {
     chain.push(
-      new GeminiSiteAnalyzer({
-        apiKey: env.ai.geminiApiKey,
-        model: env.ai.geminiModel,
-        timeoutMs: visionTimeoutMs,
-      }),
+      new GeminiSiteAnalyzer({ apiKey, model: env.ai.geminiModel, timeoutMs: visionTimeoutMs }),
     );
   }
   if (env.ai.anthropicApiKey) {

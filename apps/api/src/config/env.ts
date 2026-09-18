@@ -22,7 +22,15 @@ export const env = {
     vlmApiKey: process.env.VLM_API_KEY,
     groqApiKey: process.env.GROQ_API_KEY,
     groqModel: process.env.GROQ_MODEL ?? 'qwen/qwen3.8-27b',
-    geminiApiKey: process.env.GEMINI_API_KEY,
+    /**
+     * Gemini 키 목록(쉼표 구분). 무료 티어 한도는 **프로젝트마다 따로** 걸리므로,
+     * 서로 다른 프로젝트의 키를 여러 개 넣으면 그만큼 처리량이 늘어난다.
+     * 하나가 429 면 체인이 다음 키로 넘어간다. GEMINI_API_KEY(단수)도 계속 받는다.
+     */
+    geminiApiKeys: (process.env.GEMINI_API_KEYS ?? process.env.GEMINI_API_KEY ?? '')
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean),
     geminiModel: process.env.GEMINI_MODEL ?? 'gemini-2.5-flash',
     anthropicApiKey: process.env.ANTHROPIC_API_KEY,
     anthropicModel: process.env.ANTHROPIC_MODEL ?? 'claude-sonnet-4-6',
@@ -34,7 +42,7 @@ export const env = {
 export function activeVisionProvider(): 'self-hosted-vlm' | 'groq' | 'gemini' | 'claude' | 'mock' {
   if (env.ai.vlmBaseUrl) return 'self-hosted-vlm';
   if (env.ai.groqApiKey) return 'groq';
-  if (env.ai.geminiApiKey) return 'gemini';
+  if (env.ai.geminiApiKeys.length > 0) return 'gemini';
   if (env.ai.anthropicApiKey) return 'claude';
   return 'mock';
 }

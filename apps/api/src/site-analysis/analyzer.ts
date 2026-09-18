@@ -16,6 +16,30 @@ import {
 export class SiteAnalysisValidationError extends Error {}
 
 /**
+ * AI 가 석면을 "확정" 표현하지 못하게 한다(shared 의 출력 검증 레이어와 같은 원칙).
+ * 석면은 사진만으로 판별할 수 없고 석면안전관리법상 전문기관 조사가 의무라,
+ * "석면입니다"/"석면 없음" 모두 사용자를 오도한다. 프롬프트로 막고 여기서 한 번 더 거른다.
+ */
+const ASBESTOS_DEFINITIVE_PATTERNS: Array<[RegExp, string]> = [
+  // 더 구체적인 패턴을 먼저 둔다 — "무석면 확정" 을 일반 패턴이 먼저 물면
+  // "무석면 의심" 이라는 엉뚱한 문장이 된다.
+  [/(무|비)석면\s*(확정|확인)(되었|됨|됐)?/g, '석면 함유 여부 미확인'],
+  [/석면이\s*검출(되었|됐|됨)[^.]*/g, '석면 함유 가능성이 있어 전문 조사가 필요합니다'],
+  [/석면이\s*있(습니다|음|다)/g, '석면 함유 가능성이 있습니다'],
+  [/석면이\s*없(습니다|음|다)/g, '석면 함유 여부는 조사로 확인해야 합니다'],
+  [/석면\s*(임|입니다|이다|확인됨|확정|검출됨|존재함)/g, '석면 의심'],
+];
+
+/** 석면 확정 표현을 의심·조사필요 표현으로 바꾼다. */
+export function softenAsbestosClaims(text: string): string {
+  let out = text;
+  for (const [re, replacement] of ASBESTOS_DEFINITIVE_PATTERNS) {
+    out = out.replace(re, replacement);
+  }
+  return out;
+}
+
+/**
  * 비전 공급자 호출 실패. HTTP 상태를 보존해 체인이 대응을 나눌 수 있게 한다.
  * 429(레이트리밋)는 같은 공급자를 다시 두드려봐야 한도만 더 태우므로 즉시 다음으로 넘기고,
  * 5xx(일시적 서버 오류)만 재시도할 가치가 있다 — 실측에서 두 실패의 성격이 달랐다.
@@ -56,6 +80,10 @@ export interface AnalyzeSiteInput {
   note?: string;
   /** 공공데이터 기반 건축물대장 주구조 정보 (예: 철근콘크리트구조) — 분석 힌트. */
   buildingStructure?: string;
+  /** 건축물대장 사용승인 연도. 2009년 석면 사용 전면 금지 이전이면 석면 의심 가중. */
+  buildingYear?: number;
+  /** 건축물대장 주용도 (예: 단독주택, 제2종근린생활시설) — 자재 추정 힌트. */
+  buildingUse?: string;
 }
 
 export interface SiteAnalyzer {
@@ -63,6 +91,9 @@ export interface SiteAnalyzer {
 }
 
 const ALLOWED_MIME = new Set(['image/jpeg', 'image/png', 'image/webp']);
+
+/** 한국에서 석면 사용이 전면 금지된 해. 이전 건축물은 석면 함유 가능성을 가중한다. */
+export const ASBESTOS_BAN_YEAR = 2009;
 
 /** 종합 분석에 쓰는 최대 사진 수(과대 페이로드·비용 방지). */
 export const MAX_ANALYZE_IMAGES = 6;
@@ -107,6 +138,7 @@ export function buildUserInstruction(
   note: string | undefined,
   buildingStructure: string | undefined,
   imageCount: number,
+  building?: { year?: number; use?: string },
 ): string {
   const multi =
     imageCount > 1
@@ -119,10 +151,20 @@ export function buildUserInstruction(
   if (buildingStructure) {
     base += `\n[핵심 힌트] 이 건물의 건축물대장상 주구조는 '${buildingStructure}'입니다. 사진 속 구조물이나 뼈대를 식별할 때 이 정보를 우선적으로 참고하여 오인식을 방지하세요.`;
   }
+  if (building?.use) {
+    base += `\n[건축물대장] 주용도는 '${building.use}' 입니다. 해당 용도에서 흔한 마감재를 우선 고려하세요.`;
+  }
+  if (building?.year !== undefined) {
+    base +=
+      building.year < ASBESTOS_BAN_YEAR
+        ? `\n[건축물대장] 사용승인 ${building.year}년 — 석면 사용이 전면 금지된 ${ASBESTOS_BAN_YEAR}년 이전 건축물입니다. ` +
+          '슬레이트 지붕재·천장 텍스·배관 보온재·뿜칠 내화피복에 석면 함유 가능성이 있으니 해당 부위가 보이면 석면 의심으로 다루세요(확정 표현 금지).'
+        : `\n[건축물대장] 사용승인 ${building.year}년 — 석면 사용 금지(${ASBESTOS_BAN_YEAR}년) 이후 건축물이라 석면 자재 가능성은 낮습니다. 다만 증축·리모델링 부위는 예외일 수 있습니다.`;
+  }
   if (note) {
     base += `\n[현장 메모] ${note}`;
   }
-  
+
   return base;
 }
 
@@ -164,18 +206,48 @@ export interface ClaudeAnalyzerConfig {
   baseUrl?: string;
 }
 
-const SYSTEM_PROMPT =
-  '당신은 한국의 건설폐기물 철거 현장 분석 보조자입니다. 제공된 현장 사진을 보고 ' +
-  '구성 소재와 권장 철거 공정, 위험 요소를 분석합니다. 반드시 지정된 JSON 스키마로만 ' +
-  '응답하고, 불확실하면 confidence 를 낮추세요. 석면 등 위험 소재는 hazardous=true 로 표시하고 ' +
-  '임의 제거를 권하지 마세요. 타일(TILE)과 목재(WOOD)를 명확히 구분하세요. ' +
-  '타일은 매끄러운 광택 표면이나 욕실, 주방, 베란다 등에 주로 쓰이며, 목재는 나무 무늬나 합판 형태이므로 절대 혼동하지 마세요. ' +
-  '모든 텍스트는 한국어로 작성합니다.';
+const SYSTEM_PROMPT = [
+  '당신은 한국의 건설폐기물 철거 현장을 분석하는 전문 보조자입니다.',
+  '현장 사진을 보고 구성 소재, 권장 철거 공정, 안전 위험요소를 분석해 지정된 JSON 스키마로만 응답합니다.',
+  '',
+  '[법령·표현 규칙 — 반드시 지킬 것]',
+  '1. 석면은 사진만으로 확정할 수 없습니다. "석면임/석면 검출/석면 없음" 같은 확정 표현을 절대 쓰지 마세요.',
+  '   "석면 의심", "석면 함유 가능성", "전문 조사 필요" 까지만 표현합니다.',
+  '   석면안전관리법상 해체 전 전문기관 조사가 의무이며, 임의 제거를 권해서는 안 됩니다.',
+  '2. 한국은 2009년부터 석면 사용이 전면 금지되었습니다. 건축 시기가 그 이전이면',
+  '   슬레이트 지붕재, 천장 텍스, 배관 보온재, 뿜칠 내화피복에 석면 함유 가능성이 있습니다.',
+  '3. 건설폐기물은 종류별 분리 배출이 원칙입니다(건설폐기물의 재활용촉진에 관한 법률).',
+  '   혼합배출은 처리 단가를 크게 올리므로 공정에 분리 단계를 포함하세요.',
+  '',
+  '[소재 판별 주의]',
+  '- TILE(위생도기·타일)과 WOOD(목재)를 혼동하지 마세요. 타일은 매끄러운 광택 표면으로 욕실·주방·현관에,',
+  '  목재는 나뭇결이나 합판 층이 보입니다.',
+  '- GYPSUM(석고보드)은 흰 석고층에 종이가 붙은 단면이 특징이며, 철거 시 대량으로 부서져 쌓입니다.',
+  '- ROOFING(지붕재) 중 회색 골형 슬레이트는 석면 의심 대상입니다.',
+  '- 마감재에 가려 보이지 않는 구조체를 추측으로 단정하지 말고 confidence 를 낮추세요.',
+  '',
+  '[중량 추정 기준] estimatedKg 는 사진에 보이는 면적·두께·부피로 현실적으로 산정합니다.',
+  '참고 밀도: 철근콘크리트 2,400kg/㎥, 시멘트 몰탈 2,100, 벽돌 조적 1,900, 타일 2,000,',
+  '석고보드 약 9kg/㎡(9.5T), 목재 500, 철강 7,850.',
+  '보이지 않는 부분까지 상상해서 부풀리지 마세요.',
+  '',
+  '[신뢰도] HIGH 는 소재가 명확히 식별될 때만. 가려지거나 흐릿하면 LOW 를 쓰세요.',
+  '모든 텍스트는 한국어로 작성합니다.',
+].join('\n');
 
-const USER_INSTRUCTION =
-  '이 철거 현장 사진을 분석해 아래 JSON 스키마로만 답하세요(코드블록·설명 없이 JSON 객체 하나):\n' +
-  '{"summary": string, "materials": [{"category": "CONCRETE|STEEL|BRICK|WOOD|GLASS|GYPSUM|INSULATION|ROOFING|TILE|HAZARD|OTHER", "name": string, "estimatedKg": number, "confidence": "LOW|MEDIUM|HIGH", "recyclable": boolean, "hazardous": boolean, "note"?: string}], "demolitionSteps": [{"order": number, "title": string, "description": string, "caution"?: string}], "hazards": string[], "confidence": "LOW|MEDIUM|HIGH"}\n' +
-  '주의: 각 소재별로 사진에 보이는 면적과 부피를 바탕으로 예상되는 현실적인 철거 폐기물 중량(kg)을 estimatedKg 에 정수로 꼭 작성하세요.';
+const USER_INSTRUCTION = [
+  '이 철거 현장 사진을 분석해 아래 JSON 스키마로만 답하세요(코드블록·설명 없이 JSON 객체 하나):',
+  '{"summary": string, "materials": [{"category": "CONCRETE|STEEL|BRICK|WOOD|GLASS|GYPSUM|INSULATION|ROOFING|TILE|HAZARD|OTHER", "name": string, "estimatedKg": number, "confidence": "LOW|MEDIUM|HIGH", "recyclable": boolean, "hazardous": boolean, "note"?: string}], "demolitionSteps": [{"order": number, "title": string, "description": string, "caution"?: string}], "hazards": string[], "confidence": "LOW|MEDIUM|HIGH"}',
+  '',
+  '작성 지침:',
+  '- summary: 어떤 건물의 어떤 상태인지, 철거 난이도를 좌우하는 요소가 무엇인지 2~3문장.',
+  '- materials: 사진에서 실제로 보이는 것만. estimatedKg 는 정수로 반드시 채우세요.',
+  '  석면 의심 자재는 category 를 HAZARD, hazardous 를 true 로 하고 name 에 "(석면 의심)" 을 붙이세요.',
+  '- demolitionSteps: 실제 시공 순서대로. 사전 조사·신고 → 내부 마감재 → 설비·배관 → 지붕/비구조체',
+  '  → 구조체 → 분리 반출 흐름을 현장 상황에 맞게 조정하세요.',
+  '  caution 에는 그 단계에서 실제로 사고가 나는 지점을 적으세요(일반론 금지).',
+  '- hazards: 이 현장에 실제로 보이는 위험만. 보이지 않는 위험을 나열하지 마세요.',
+].join('\n');
 
 /** 모델 텍스트 응답에서 JSON 을 추출·검증해 SiteAnalysis 로 정규화(공급자 공용). */
 export function parseVisionJson(text: string): SiteAnalysis {
@@ -186,20 +258,22 @@ export function parseVisionJson(text: string): SiteAnalysis {
   const rawMaterials = Array.isArray(raw.materials) ? raw.materials : [];
   
   return {
-    summary: typeof raw.summary === 'string' ? raw.summary : '현장 분석 결과',
+    summary: softenAsbestosClaims(typeof raw.summary === 'string' ? raw.summary : '현장 분석 결과'),
     materials: rawMaterials.map((m: any) => ({
       category: m.category,
-      name: m.name,
+      name: typeof m.name === 'string' ? softenAsbestosClaims(m.name) : m.name,
       estimatedKg: typeof m.estimatedKg === 'number' ? m.estimatedKg : undefined,
       confidence: m.confidence,
       recyclable: !!m.recyclable,
       hazardous: !!m.hazardous,
-      note: m.note
+      note: typeof m.note === 'string' ? softenAsbestosClaims(m.note) : m.note,
     })) as DetectedMaterial[],
     demolitionSteps: Array.isArray(raw.demolitionSteps)
       ? (raw.demolitionSteps as DemolitionStep[])
       : [],
-    hazards: Array.isArray(raw.hazards) ? raw.hazards.filter((h): h is string => typeof h === 'string') : [],
+    hazards: Array.isArray(raw.hazards)
+      ? raw.hazards.filter((h): h is string => typeof h === 'string').map(softenAsbestosClaims)
+      : [],
     method: 'AI_VISION',
     confidence: raw.confidence === 'HIGH' || raw.confidence === 'MEDIUM' ? raw.confidence : 'LOW',
     disclaimer: SITE_ANALYSIS_DISCLAIMER,
@@ -242,7 +316,7 @@ export class GeminiSiteAnalyzer implements SiteAnalyzer {
                   ...images.map((im) => ({
                     inline_data: { mime_type: im.mimeType, data: im.imageBase64 },
                   })),
-                  { text: buildUserInstruction(input.note, input.buildingStructure, images.length) },
+                  { text: buildUserInstruction(input.note, input.buildingStructure, images.length, { year: input.buildingYear, use: input.buildingUse }) },
                 ],
               },
             ],
@@ -313,7 +387,7 @@ export class GroqSiteAnalyzer implements SiteAnalyzer {
             {
               role: 'user',
               content: [
-                { type: 'text', text: buildUserInstruction(input.note, input.buildingStructure, images.length) },
+                { type: 'text', text: buildUserInstruction(input.note, input.buildingStructure, images.length, { year: input.buildingYear, use: input.buildingUse }) },
                 ...images.map((im) => ({
                   type: 'image_url' as const,
                   image_url: { url: `data:${im.mimeType};base64,${im.imageBase64}` },
@@ -375,7 +449,7 @@ export class SelfHostedVlmAnalyzer implements SiteAnalyzer {
               content: [
                 {
                   type: 'text',
-                  text: buildUserInstruction(input.note, input.buildingStructure, images.length),
+                  text: buildUserInstruction(input.note, input.buildingStructure, images.length, { year: input.buildingYear, use: input.buildingUse }),
                 },
                 ...images.map((im) => ({
                   type: 'image_url' as const,
@@ -425,7 +499,7 @@ export class ClaudeSiteAnalyzer implements SiteAnalyzer {
                   type: 'image' as const,
                   source: { type: 'base64' as const, media_type: im.mimeType, data: im.imageBase64 },
                 })),
-                { type: 'text', text: buildUserInstruction(input.note, input.buildingStructure, images.length) },
+                { type: 'text', text: buildUserInstruction(input.note, input.buildingStructure, images.length, { year: input.buildingYear, use: input.buildingUse }) },
               ],
             },
           ],

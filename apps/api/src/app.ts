@@ -11,6 +11,7 @@ import {
 import { HeuristicVolumeEstimator } from './estimation/provider.js';
 import { createSiteAnalysisRouter } from './routes/site-analysis.js';
 import { env, activeVisionProvider } from './config/env.js';
+import { BuildingRegisterClient } from './public-data/building-register.js';
 
 /**
  * 디몰비전 API(경량형) — 현장 사진 → 소재/공정/위험 분석 + 물량 추정.
@@ -75,10 +76,25 @@ export function createApp() {
   const chain = buildAnalyzerChain(mock);
 
   app.get('/api/health', (_req, res) => {
-    res.json({ ok: true, provider: activeVisionProvider() });
+    res.json({
+      ok: true,
+      provider: activeVisionProvider(),
+      publicData: { buildingRegister: Boolean(env.publicData.serviceKey) },
+    });
   });
 
-  app.use('/api', createSiteAnalysisRouter(chain, new HeuristicVolumeEstimator()));
+  // 공공데이터 키가 있을 때만 건축물대장 보강을 켠다(없으면 사진만으로 분석).
+  const registry = env.publicData.serviceKey
+    ? new BuildingRegisterClient({
+        serviceKey: env.publicData.serviceKey,
+        timeoutMs: env.publicData.timeoutMs,
+      })
+    : undefined;
+
+  app.use(
+    '/api',
+    createSiteAnalysisRouter(chain, new HeuristicVolumeEstimator(), {}, registry),
+  );
 
   return app;
 }

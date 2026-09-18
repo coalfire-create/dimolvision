@@ -152,6 +152,8 @@ export function SiteAnalysisScreen() {
   /** 선택 입력 — 연면적(평)과 주구조. 넣으면 물량 추정이 붙는다. */
   const [pyeong, setPyeong] = useState('');
   const [structure, setStructure] = useState<BuildingStructure | null>(null);
+  /** 건축년도(사용승인). 2009년 석면 사용 금지 이전이면 AI 가 석면 의심을 가중한다. */
+  const [buildYear, setBuildYear] = useState('');
   const [estimate, setEstimate] = useState<VolumeEstimate | null>(null);
 
   function applyAssets(assets: ImagePicker.ImagePickerAsset[]) {
@@ -206,18 +208,27 @@ export function SiteAnalysisScreen() {
    * 사진만 있으면 소재·공정만, 연면적까지 있으면 물량 추정(톤·트럭 대수)까지 한 번에.
    * 면적은 선택 입력이라 없어도 체험이 막히지 않는다.
    */
+  /** 입력된 건축년도. 1900~올해 범위만 힌트로 쓴다. */
+  function buildingYear(): number | undefined {
+    const y = Number(buildYear);
+    const now = new Date().getFullYear();
+    return Number.isInteger(y) && y >= 1900 && y <= now ? y : undefined;
+  }
+
   async function runAnalysis(shots: PickedImage[]) {
     const payload = shots.map((i) => ({ imageBase64: i.base64, mimeType: i.mimeType }));
     const area = floorAreaM2();
+    const year = buildingYear();
     if (area === undefined) {
       setEstimate(null);
-      setResult(await analyzeSite({ images: payload }));
+      setResult(await analyzeSite({ images: payload, ...(year ? { buildingYear: year } : {}) }));
       return;
     }
     const r = await analyzeSiteWasteItems({
       images: payload,
       floorAreaM2: area,
       ...(structure ? { structure } : {}),
+      ...(year ? { buildingYear: year } : {}),
     });
     setEstimate(r.estimate ?? null);
     setResult(r.analysis);
@@ -441,10 +452,10 @@ export function SiteAnalysisScreen() {
         {images.length > 0 && !loading ? (
           <FadeInUp delay={60}>
             <View style={styles.areaCard}>
-              <Text style={styles.areaTitle}>연면적을 알면 물량까지 추정해 드려요</Text>
+              <Text style={styles.areaTitle}>건물 정보를 알면 더 정확해져요</Text>
               <Text style={styles.areaSub}>
                 {result
-                  ? '연면적을 넣고 다시 분석하면 예상 톤수와 트럭 대수까지 나옵니다.'
+                  ? '연면적·건축년도를 넣고 다시 분석하면 물량과 석면 위험까지 정밀해집니다.'
                   : '선택 입력이에요. 비워두면 소재·공정 분석만 진행합니다.'}
               </Text>
               <View style={styles.areaInputRow}>
@@ -460,6 +471,25 @@ export function SiteAnalysisScreen() {
                 />
                 <Text style={styles.areaUnit}>평</Text>
               </View>
+              <View style={styles.areaInputRow}>
+                <TextInput
+                  style={styles.areaInput}
+                  value={buildYear}
+                  onChangeText={setBuildYear}
+                  keyboardType="numeric"
+                  inputMode="numeric"
+                  placeholder="예: 1995"
+                  placeholderTextColor={theme.colors.textMuted}
+                  accessibilityLabel="건축년도(사용승인) 입력"
+                />
+                <Text style={styles.areaUnit}>년</Text>
+              </View>
+              {buildingYear() !== undefined && buildingYear()! < 2009 ? (
+                <Text style={styles.yearHint}>
+                  2009년 석면 사용 금지 이전 건축물이라 석면 의심 자재를 중점 확인합니다
+                </Text>
+              ) : null}
+
               <Text style={styles.areaStructLabel}>주구조 (선택하면 추정이 정밀해져요)</Text>
               <View style={styles.structRow}>
                 {(['RC', 'BRICK', 'WOOD'] as BuildingStructure[]).map((k) => {
@@ -1066,6 +1096,13 @@ const styles = StyleSheet.create({
   },
   areaUnit: { color: colors.text, fontSize: font.bodyLarge, fontWeight: '700' },
   areaStructLabel: { color: colors.textMuted, fontSize: 12, marginTop: spacing.sm },
+  yearHint: {
+    color: colors.primary,
+    fontSize: 12,
+    fontWeight: '600',
+    lineHeight: 17,
+    marginTop: 6,
+  },
   structRow: { flexDirection: 'row', gap: spacing.xs, marginTop: 6 },
   structChip: {
     flex: 1,

@@ -52,6 +52,9 @@ export const analyzeSite = (input: {
   images?: AnalyzeImage[];
   note?: string;
   buildingStructure?: string;
+  /** 건축물대장 사용승인 연도 — 2009년 석면 금지 이전이면 석면 의심을 가중한다. */
+  buildingYear?: number;
+  buildingUse?: string;
 }) => api<SiteAnalysis>('/site-analysis/analyze', { method: 'POST', body: JSON.stringify(input) });
 
 export interface PhotoWasteItemsResult {
@@ -69,6 +72,8 @@ export const analyzeSiteWasteItems = (input: {
   floors?: number;
   structure?: BuildingStructure;
   buildingStructure?: string;
+  buildingYear?: number;
+  buildingUse?: string;
 }) =>
   api<PhotoWasteItemsResult>('/site-analysis/waste-items', {
     method: 'POST',

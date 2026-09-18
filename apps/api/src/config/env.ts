@@ -36,6 +36,14 @@ export const env = {
     anthropicModel: process.env.ANTHROPIC_MODEL ?? 'claude-sonnet-4-6',
     visionTimeoutMs: Number(process.env.VISION_TIMEOUT_MS ?? 30_000),
   },
+  /**
+   * 공공데이터포털 인증키(건축물대장). 없으면 공공데이터 보강 없이 사진만으로 분석한다.
+   * 발급: https://www.data.go.kr → '건축물대장정보 서비스' 활용신청 → 일반 인증키(Decoding)
+   */
+  publicData: {
+    serviceKey: process.env.DATA_GO_KR_SERVICE_KEY,
+    timeoutMs: Number(process.env.PUBLIC_DATA_TIMEOUT_MS ?? 5_000),
+  },
 } as const;
 
 /** 선택된 비전 공급자 이름(로그·헬스체크용, 키 값은 노출하지 않는다). */

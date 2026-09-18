@@ -7,6 +7,9 @@ import {
   GroqSiteAnalyzer,
   SelfHostedVlmAnalyzer,
   SiteAnalysisValidationError,
+  buildUserInstruction,
+  parseVisionJson,
+  softenAsbestosClaims,
 } from './analyzer.js';
 
 const IMG = 'A'.repeat(200); // 유효 길이 통과용 더미 base64
@@ -277,5 +280,53 @@ describe('GeminiSiteAnalyzer 생성 설정', () => {
     expect(body.generationConfig.thinkingConfig.thinkingBudget).toBe(0);
     expect(body.generationConfig.maxOutputTokens).toBeGreaterThanOrEqual(8000);
     expect(body.generationConfig.responseMimeType).toBe('application/json');
+  });
+});
+
+describe('석면 확정 표현 차단', () => {
+  it('확정 표현을 의심·조사필요 표현으로 바꾼다', () => {
+    expect(softenAsbestosClaims('지붕재는 석면입니다.')).toContain('석면 의심');
+    expect(softenAsbestosClaims('석면이 검출되었습니다')).toContain('전문 조사가 필요');
+    expect(softenAsbestosClaims('석면이 있습니다')).toContain('가능성');
+    expect(softenAsbestosClaims('석면이 없습니다')).toContain('조사로 확인');
+    expect(softenAsbestosClaims('무석면 확정')).toContain('미확인');
+  });
+
+  it('의심 표현은 그대로 둔다', () => {
+    const ok = '슬레이트 지붕재로 석면 의심 부위입니다. 전문 조사가 필요합니다.';
+    expect(softenAsbestosClaims(ok)).toBe(ok);
+  });
+
+  it('AI 응답 파싱에서 요약·소재명·위험요소 모두 걸러진다', () => {
+    const r = parseVisionJson(
+      '{"summary":"지붕은 석면입니다","materials":[{"category":"HAZARD","name":"석면이 검출되었습니다","confidence":"HIGH","recyclable":false,"hazardous":true}],"demolitionSteps":[],"hazards":["석면이 있습니다"],"confidence":"HIGH"}',
+    );
+    expect(r.summary).not.toMatch(/석면입니다/);
+    expect(r.materials[0]?.name).not.toMatch(/검출되었습니다/);
+    expect(r.hazards[0]).not.toMatch(/석면이 있습니다/);
+  });
+});
+
+describe('건축물대장 힌트가 지시문에 반영된다', () => {
+  it('2009년 이전 건축물이면 석면 의심을 가중한다', () => {
+    const t = buildUserInstruction(undefined, undefined, 1, { year: 1995 });
+    expect(t).toContain('1995년');
+    expect(t).toContain('석면');
+    expect(t).toMatch(/슬레이트|보온재|내화피복/);
+  });
+
+  it('2009년 이후 건축물이면 가능성이 낮다고 알린다', () => {
+    const t = buildUserInstruction(undefined, undefined, 1, { year: 2018 });
+    expect(t).toContain('2018년');
+    expect(t).toMatch(/가능성은 낮/);
+  });
+
+  it('주용도도 힌트로 넣는다', () => {
+    expect(buildUserInstruction(undefined, undefined, 1, { use: '단독주택' })).toContain('단독주택');
+  });
+
+  it('대장 정보가 없으면 힌트를 붙이지 않는다', () => {
+    const t = buildUserInstruction(undefined, undefined, 1);
+    expect(t).not.toContain('건축물대장');
   });
 });

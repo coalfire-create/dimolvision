@@ -7,6 +7,7 @@ import {
   type SiteAnalyzer,
 } from '../site-analysis/analyzer.js';
 import type { VolumeEstimator } from '../estimation/provider.js';
+import type { BuildingRegisterClient } from '../public-data/building-register.js';
 
 /**
  * 현장 사진 AI 분석 API (로드맵 Phase 6).
@@ -30,6 +31,7 @@ export function createSiteAnalysisRouter(
   chain: SiteAnalyzer[],
   estimator?: VolumeEstimator,
   options: SiteAnalysisRouterOptions = {},
+  registry?: BuildingRegisterClient,
 ): Router {
   if (chain.length === 0) throw new Error('분석기 체인이 비어 있습니다.');
   const attempts = Math.max(1, options.attemptsPerAnalyzer ?? 2);
@@ -56,6 +58,39 @@ export function createSiteAnalysisRouter(
       images: images && images.length > 0 ? images : undefined,
       note: typeof body.note === 'string' ? body.note : undefined,
       buildingStructure: typeof body.buildingStructure === 'string' ? body.buildingStructure : undefined,
+      buildingYear: typeof body.buildingYear === 'number' ? body.buildingYear : undefined,
+      buildingUse: typeof body.buildingUse === 'string' ? body.buildingUse : undefined,
+    };
+  }
+
+  /**
+   * 건축물대장 조회(선택). 주소 코드가 오면 주구조·연면적·층수·승인연도를 받아
+   * 분석 힌트와 물량 추정에 넣는다. 키가 없거나 조회가 실패해도 분석은 그대로 진행한다.
+   */
+  async function lookupRegister(body: Record<string, unknown>) {
+    const sigunguCd = typeof body.sigunguCd === 'string' ? body.sigunguCd : undefined;
+    const bjdongCd = typeof body.bjdongCd === 'string' ? body.bjdongCd : undefined;
+    if (!registry || !sigunguCd || !bjdongCd) return undefined;
+    return registry.lookup({
+      sigunguCd,
+      bjdongCd,
+      bun: typeof body.bun === 'string' ? body.bun : undefined,
+      ji: typeof body.ji === 'string' ? body.ji : undefined,
+      platGbCd: typeof body.platGbCd === 'string' ? body.platGbCd : undefined,
+    });
+  }
+
+  /** 대장에서 얻은 값을 분석 입력의 힌트로 채운다(사용자가 직접 준 값이 있으면 그것을 존중). */
+  function withRegisterHints(
+    input: AnalyzeSiteInput,
+    register: Awaited<ReturnType<typeof lookupRegister>>,
+  ): AnalyzeSiteInput {
+    if (!register) return input;
+    return {
+      ...input,
+      buildingStructure: input.buildingStructure ?? register.structureName,
+      buildingYear: input.buildingYear ?? register.approvedYear,
+      buildingUse: input.buildingUse ?? register.mainUse,
     };
   }
 
@@ -94,9 +129,12 @@ export function createSiteAnalysisRouter(
 
   // POST /api/site-analysis/analyze  { imageBase64, mimeType?, note? }
   router.post('/site-analysis/analyze', async (req, res) => {
-    const input = parseInput((req.body ?? {}) as Record<string, unknown>);
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    const input = parseInput(body);
     try {
-      res.json(await analyzeWithFallback(input));
+      const register = await lookupRegister(body);
+      const analysis = await analyzeWithFallback(withRegisterHints(input, register));
+      res.json({ ...analysis, ...(register ? { buildingRegister: register } : {}) });
     } catch (err) {
       if (err instanceof SiteAnalysisValidationError) {
         res.status(400).json({ error: err.message });
@@ -128,12 +166,23 @@ export function createSiteAnalysisRouter(
         ? body.structure
         : undefined;
     try {
-      const analysis = await analyzeWithFallback(input);
+      const register = await lookupRegister(body);
+      const analysis = await analyzeWithFallback(withRegisterHints(input, register));
+
+      // 대장 값이 사용자가 적어낸 값보다 정확하다 — 연면적은 이미 전체 면적이므로 층수를 곱하지 않는다.
+      const area = register?.totalFloorAreaM2 ?? floorAreaM2;
+      const effFloors = register?.totalFloorAreaM2 !== undefined ? undefined : floors;
+      const effStructure = register?.structure ?? structure;
+
       let totalKg: number | undefined;
       let estimate: VolumeEstimate | undefined;
-      if (estimator && floorAreaM2 !== undefined) {
+      if (estimator && area !== undefined) {
         try {
-          estimate = await estimator.estimate({ floorAreaM2, floors, structure });
+          estimate = await estimator.estimate({
+            floorAreaM2: area,
+            floors: effFloors,
+            structure: effStructure,
+          });
           totalKg = estimate.estimatedTons * 1000;
         } catch {
           // 면적 입력이 잘못돼도 사진 분석 자체는 성공이므로 소재별 기본값으로 진행한다.
@@ -143,6 +192,7 @@ export function createSiteAnalysisRouter(
         analysis,
         wasteItems: siteAnalysisToWasteItems(analysis.materials, totalKg),
         ...(estimate ? { estimate } : {}),
+        ...(register ? { buildingRegister: register } : {}),
       });
     } catch (err) {
       if (err instanceof SiteAnalysisValidationError) {

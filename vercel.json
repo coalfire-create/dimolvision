@@ -1,7 +1,12 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
-  "buildCommand": "npm run build:shared && npm run build -w @dimolvision/api && npm --workspace @dimolvision/app exec -- expo export --platform web --output-dir dist",
+  "buildCommand": "npm run build:shared && npm run build -w @dimolvision/api && npm --workspace @dimolvision/app exec -- expo export --platform web --output-dir dist && node scripts/inject-meta.mjs apps/app/dist/index.html",
   "outputDirectory": "apps/app/dist",
   "installCommand": "npm install",
-  "rewrites": [{ "source": "/api/(.*)", "destination": "/api" }]
+  "rewrites": [
+    {
+      "source": "/api/(.*)",
+      "destination": "/api"
+    }
+  ]
 }

@@ -1,6 +1,7 @@
 import React from 'react';
-import { Platform, StyleSheet, Text, View } from 'react-native';
-import { theme } from './theme';
+import { Image, Platform, StyleSheet, Text, View } from 'react-native';
+import { CONTENT_MAX_WIDTH, theme } from './theme';
+import brandmark from '../assets/brandmark.png';
 
 /**
  * 단일 화면 앱용 최소 헤더. (디몰링크 본체의 네비게이션 스택에서 분리하며,
@@ -9,7 +10,13 @@ import { theme } from './theme';
 export function ScreenHeader({ title }: { title: string; canGoBack?: boolean }) {
   return (
     <View style={styles.header}>
-      <Text style={styles.headerTitle}>{title}</Text>
+      <View style={styles.headerInner}>
+        <Image source={brandmark} style={styles.headerLogo} resizeMode="contain" />
+        <View>
+          <Text style={styles.headerBrand}>디몰비전</Text>
+          <Text style={styles.headerSub}>{title}</Text>
+        </View>
+      </View>
     </View>
   );
 }
@@ -24,13 +31,25 @@ const styles = StyleSheet.create({
     paddingTop: Platform.OS === 'web' ? spacing.sm : 52,
     paddingBottom: spacing.sm,
     paddingHorizontal: spacing.md,
-    alignItems: 'center',
-    justifyContent: 'center',
   },
-  headerTitle: {
+  headerInner: {
+    width: '100%',
+    maxWidth: CONTENT_MAX_WIDTH,
+    alignSelf: 'center',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+  },
+  headerLogo: { width: 30, height: 30 },
+  headerBrand: {
     color: colors.text,
-    fontSize: font.title - 2,
+    fontSize: font.bodyLarge,
     fontWeight: '800',
-    textAlign: 'center',
+    letterSpacing: -0.2,
+  },
+  headerSub: {
+    color: colors.textMuted,
+    fontSize: 12,
+    marginTop: 1,
   },
 });

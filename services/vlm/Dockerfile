@@ -19,9 +19,16 @@ ENV HF_HOME=/models
 # 비공개(gated) 모델을 쓸 때만 필요. Qwen2.5-VL 은 공개 모델이라 없어도 된다.
 ARG HF_TOKEN=""
 
+# 20GB 급 모델은 다운로드가 중간에 끊기는 일이 잦다(CAS/IncompleteBody).
+# xet 전송을 끄고 재시도를 둬서 빌드가 한 번의 네트워크 흔들림으로 날아가지 않게 한다.
+ENV HF_HUB_DISABLE_XET=1
+ENV HF_HUB_ENABLE_HF_TRANSFER=0
 RUN mkdir -p /models && \
-    HF_TOKEN=${HF_TOKEN} huggingface-cli download "${MODEL_ID}" \
-      --exclude "*.pth" "*.bin" "original/*" && \
+    for i in 1 2 3 4 5; do \
+      HF_TOKEN=${HF_TOKEN} huggingface-cli download "${MODEL_ID}" \
+        --exclude "*.pth" "*.bin" "original/*" && break || \
+      { echo "다운로드 재시도 $i/5"; sleep 20; }; \
+    done && \
     rm -rf /root/.cache/pip
 
 # Cloud Run 은 $PORT 로 트래픽을 보낸다(기본 8080).

@@ -460,31 +460,39 @@ export function SiteAnalysisScreen() {
                   ? '연면적·건축년도를 넣고 다시 분석하면 물량과 석면 위험까지 정밀해집니다.'
                   : '선택 입력이에요. 비워두면 소재·공정 분석만 진행합니다.'}
               </Text>
-              <View style={styles.areaInputRow}>
-                <TextInput
-                  style={styles.areaInput}
-                  value={pyeong}
-                  onChangeText={setPyeong}
-                  keyboardType="numeric"
-                  inputMode="numeric"
-                  placeholder="예: 40"
-                  placeholderTextColor={theme.colors.textMuted}
-                  accessibilityLabel="연면적(평) 입력"
-                />
-                <Text style={styles.areaUnit}>평</Text>
-              </View>
-              <View style={styles.areaInputRow}>
-                <TextInput
-                  style={styles.areaInput}
-                  value={buildYear}
-                  onChangeText={setBuildYear}
-                  keyboardType="numeric"
-                  inputMode="numeric"
-                  placeholder="예: 1995"
-                  placeholderTextColor={theme.colors.textMuted}
-                  accessibilityLabel="건축년도(사용승인) 입력"
-                />
-                <Text style={styles.areaUnit}>년</Text>
+              <View style={styles.fieldRow}>
+                <View style={styles.field}>
+                  <Text style={styles.fieldLabel}>연면적</Text>
+                  <View style={styles.areaInputRow}>
+                    <TextInput
+                      style={styles.areaInput}
+                      value={pyeong}
+                      onChangeText={setPyeong}
+                      keyboardType="numeric"
+                      inputMode="numeric"
+                      placeholder="40"
+                      placeholderTextColor={theme.colors.textMuted}
+                      accessibilityLabel="연면적(평) 입력"
+                    />
+                    <Text style={styles.areaUnit}>평</Text>
+                  </View>
+                </View>
+                <View style={styles.field}>
+                  <Text style={styles.fieldLabel}>건축년도</Text>
+                  <View style={styles.areaInputRow}>
+                    <TextInput
+                      style={styles.areaInput}
+                      value={buildYear}
+                      onChangeText={setBuildYear}
+                      keyboardType="numeric"
+                      inputMode="numeric"
+                      placeholder="1995"
+                      placeholderTextColor={theme.colors.textMuted}
+                      accessibilityLabel="건축년도(사용승인) 입력"
+                    />
+                    <Text style={styles.areaUnit}>년</Text>
+                  </View>
+                </View>
               </View>
               {buildingYear() !== undefined && buildingYear()! < 2009 ? (
                 <Text style={styles.yearHint}>
@@ -492,7 +500,7 @@ export function SiteAnalysisScreen() {
                 </Text>
               ) : null}
 
-              <Text style={styles.areaStructLabel}>주구조 (선택하면 추정이 정밀해져요)</Text>
+              <Text style={styles.areaStructLabel}>주구조</Text>
               <View style={styles.structRow}>
                 {(['RC', 'BRICK', 'WOOD'] as BuildingStructure[]).map((k) => {
                   const on = structure === k;
@@ -1326,7 +1334,6 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.xs,
-    marginTop: spacing.sm,
   },
   areaInput: {
     flex: 1,
@@ -1341,6 +1348,14 @@ const styles = StyleSheet.create({
   },
   areaUnit: { color: colors.text, fontSize: font.bodyLarge, fontWeight: '700' },
   areaStructLabel: { color: colors.textMuted, fontSize: 12, marginTop: spacing.sm },
+  fieldRow: { flexDirection: 'row', gap: spacing.sm, marginTop: spacing.sm },
+  field: { flex: 1 },
+  fieldLabel: {
+    color: colors.text,
+    fontSize: 12,
+    fontWeight: '700',
+    marginBottom: 5,
+  },
   yearHint: {
     color: colors.primary,
     fontSize: 12,

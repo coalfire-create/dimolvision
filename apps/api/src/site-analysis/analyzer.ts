@@ -399,6 +399,8 @@ export class GeminiSiteAnalyzer implements SiteAnalyzer {
             generationConfig: {
               maxOutputTokens: 8000,
               responseMimeType: 'application/json',
+              // 스키마를 강제하지 않으면 견적 자료가 들쭉날쭉하게 빠진다(실측 확인).
+              responseSchema: ANALYSIS_JSON_SCHEMA,
               // gemini-2.5 계열은 기본적으로 사고(thinking) 토큰을 먼저 쓴다. 그대로 두면
               // 예산을 사고에 소진해 JSON 이 중간에 잘리고(파싱 실패) 응답도 느려진다.
               // 우리는 정해진 스키마를 채우는 작업이라 사고가 필요 없어 꺼둔다.
@@ -490,14 +492,25 @@ export class GroqSiteAnalyzer implements SiteAnalyzer {
  * 스키마를 강제하자 603토큰으로 5개를 채웠다. 호스팅 대형 모델은 이 문제가 없어
  * 자체 VLM 경로에만 적용한다.
  */
-const VLM_JSON_SCHEMA = {
+/**
+ * 분석 응답 스키마 — Gemini(responseSchema)와 자체 VLM(guided json_schema)이 함께 쓴다.
+ *
+ * 왜 강제하는가: 자유 형식 JSON 으로 두면 모델이 스키마를 끝까지 채우지 않는다.
+ * 실측에서 같은 요청을 두 번 보냈는데 한 번은 분류 6·장비 3·체크리스트 7 이 다 나오고
+ * 다른 한 번은 분류 3·장비 0·체크리스트 0 으로 잘렸다. 견적 자료가 들쭉날쭉하면
+ * 실무에서 못 쓴다. 스키마를 강제하면 3회 연속 전 항목이 채워지는 것을 확인했다.
+ *
+ * minItems 는 "최소한 이만큼은 보라"는 지시로 작동한다. 과하게 잡으면 모델이 억지로
+ * 지어내므로, 철거 현장이라면 현실적으로 그 정도는 관찰되는 수준으로만 뒀다.
+ */
+const ANALYSIS_JSON_SCHEMA = {
   type: 'object',
   properties: {
     summary: { type: 'string' },
     materials: {
       type: 'array',
-      minItems: 5,
-      maxItems: 10,
+      minItems: 4,
+      maxItems: 12,
       items: {
         type: 'object',
         properties: {
@@ -518,7 +531,7 @@ const VLM_JSON_SCHEMA = {
     demolitionSteps: {
       type: 'array',
       minItems: 4,
-      maxItems: 7,
+      maxItems: 8,
       items: {
         type: 'object',
         properties: {
@@ -532,8 +545,46 @@ const VLM_JSON_SCHEMA = {
     },
     hazards: { type: 'array', minItems: 3, maxItems: 8, items: { type: 'string' } },
     confidence: { type: 'string', enum: ['LOW', 'MEDIUM', 'HIGH'] },
+    quoteBasis: {
+      type: 'object',
+      properties: {
+        wasteByClass: {
+          type: 'array',
+          minItems: 3,
+          maxItems: 10,
+          items: {
+            type: 'object',
+            properties: {
+              wasteClass: {
+                type: 'string',
+                enum: ['CONCRETE','ASPHALT','BRICK_BLOCK','WOOD','PLASTIC','METAL','GLASS','BOARD','MIXED','DESIGNATED'],
+              },
+              estimatedKg: { type: 'integer' },
+              separable: { type: 'boolean' },
+              note: { type: 'string' },
+            },
+            required: ['wasteClass', 'estimatedKg', 'separable'],
+          },
+        },
+        equipment: {
+          type: 'array',
+          minItems: 2,
+          maxItems: 6,
+          items: {
+            type: 'object',
+            properties: { name: { type: 'string' }, spec: { type: 'string' }, reason: { type: 'string' } },
+            required: ['name', 'reason'],
+          },
+        },
+        estimatedWorkDays: { type: 'integer' },
+        estimatedCrewSize: { type: 'integer' },
+        siteChecklist: { type: 'array', minItems: 4, maxItems: 10, items: { type: 'string' } },
+        costDrivers: { type: 'array', minItems: 3, maxItems: 8, items: { type: 'string' } },
+      },
+      required: ['wasteByClass','equipment','estimatedWorkDays','estimatedCrewSize','siteChecklist','costDrivers'],
+    },
   },
-  required: ['summary', 'materials', 'demolitionSteps', 'hazards', 'confidence'],
+  required: ['summary', 'materials', 'demolitionSteps', 'hazards', 'confidence', 'quoteBasis'],
 } as const;
 
 /**
@@ -584,7 +635,7 @@ export class SelfHostedVlmAnalyzer implements SiteAnalyzer {
           // 스키마 강제 — 소형 모델이 JSON 을 끝까지 채우게 한다.
           response_format: {
             type: 'json_schema',
-            json_schema: { name: 'site_analysis', schema: VLM_JSON_SCHEMA },
+            json_schema: { name: 'site_analysis', schema: ANALYSIS_JSON_SCHEMA },
           },
           max_tokens: 3000,
           temperature: 0,

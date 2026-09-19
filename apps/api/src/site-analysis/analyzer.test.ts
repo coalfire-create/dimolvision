@@ -361,10 +361,24 @@ describe('SelfHostedVlmAnalyzer 출력 품질 설정', () => {
     // json_object 로는 소형 모델이 스키마를 못 채운다 — 스키마 강제여야 한다.
     expect(body.response_format.type).toBe('json_schema');
     const schema = body.response_format.json_schema.schema;
-    expect(schema.properties.materials.minItems).toBeGreaterThanOrEqual(5);
+    expect(schema.properties.materials.minItems).toBeGreaterThanOrEqual(4);
     expect(schema.properties.demolitionSteps.minItems).toBeGreaterThanOrEqual(4);
     expect(schema.properties.hazards.minItems).toBeGreaterThanOrEqual(3);
     expect(schema.required).toContain('materials');
+    // 견적 기초자료도 스키마로 강제해야 항목이 들쭉날쭉하지 않다.
+    expect(schema.required).toContain('quoteBasis');
+    const q = schema.properties.quoteBasis;
+    expect(q.required).toEqual(
+      expect.arrayContaining([
+        'wasteByClass',
+        'equipment',
+        'estimatedWorkDays',
+        'estimatedCrewSize',
+        'siteChecklist',
+        'costDrivers',
+      ]),
+    );
+    expect(q.properties.siteChecklist.minItems).toBeGreaterThanOrEqual(4);
     // 스키마를 채우려면 1500 토큰으로는 부족하다(실측 603~645 + 여유).
     expect(body.max_tokens).toBeGreaterThanOrEqual(3000);
     // 부위+자재 지시가 붙어야 "콘크리트" 대신 "바닥 콘크리트 슬래브" 가 나온다.
@@ -431,5 +445,66 @@ describe('견적 기초자료(quoteBasis) 파싱', () => {
     );
     expect(r.quoteBasis?.wasteByClass).toHaveLength(2);
     expect(r.quoteBasis?.siteChecklist).toHaveLength(2);
+  });
+});
+
+describe('Gemini 응답 스키마 강제', () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('responseSchema 로 견적 항목까지 강제한다', async () => {
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      json: async () => ({
+        candidates: [
+          {
+            content: {
+              parts: [
+                {
+                  text: '{"summary":"현장","materials":[],"demolitionSteps":[],"hazards":[],"confidence":"LOW"}',
+                },
+              ],
+            },
+          },
+        ],
+      }),
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await new GeminiSiteAnalyzer({
+      apiKey: 'k',
+      model: 'gemini-2.5-flash',
+      timeoutMs: 5000,
+    }).analyze({ imageBase64: IMG });
+
+    const body = JSON.parse(fetchMock.mock.calls[0]?.[1]?.body as string);
+    const gc = body.generationConfig;
+    // 스키마 없이 두면 견적 항목이 빠진 응답이 섞여 나온다(실측).
+    expect(gc.responseSchema).toBeDefined();
+    expect(gc.responseSchema.required).toContain('quoteBasis');
+    expect(gc.responseSchema.properties.quoteBasis.required).toContain('siteChecklist');
+    expect(gc.thinkingConfig.thinkingBudget).toBe(0);
+  });
+
+  it('자체 VLM 과 같은 스키마를 쓴다 — 공급자가 달라도 결과 모양이 같아야 한다', async () => {
+    const mk = () =>
+      vi.fn(async () => ({
+        ok: true,
+        json: async () => ({
+          candidates: [{ content: { parts: [{ text: '{"summary":"s","materials":[],"demolitionSteps":[],"hazards":[],"confidence":"LOW"}' }] } }],
+          choices: [{ message: { content: '{"summary":"s","materials":[],"demolitionSteps":[],"hazards":[],"confidence":"LOW"}' } }],
+        }),
+      }));
+
+    const g = mk();
+    vi.stubGlobal('fetch', g);
+    await new GeminiSiteAnalyzer({ apiKey: 'k', model: 'm', timeoutMs: 5000 }).analyze({ imageBase64: IMG });
+    const gSchema = JSON.parse(g.mock.calls[0]?.[1]?.body as string).generationConfig.responseSchema;
+
+    const v = mk();
+    vi.stubGlobal('fetch', v);
+    await new SelfHostedVlmAnalyzer({ baseUrl: 'https://x/v1', model: 'm', timeoutMs: 5000 }).analyze({ imageBase64: IMG });
+    const vSchema = JSON.parse(v.mock.calls[0]?.[1]?.body as string).response_format.json_schema.schema;
+
+    expect(gSchema).toEqual(vSchema);
   });
 });

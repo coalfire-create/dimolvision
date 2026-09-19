@@ -185,3 +185,48 @@ describe('matchEquipmentAll', () => {
     expect(matchEquipmentAll('살수차')).toEqual([]);
   });
 });
+
+describe('장비비 계상 규칙', () => {
+  it('"대형브레이커" 의 크기 낱말을 모기계 등급으로 쓰지 않는다', () => {
+    // '대형' 은 브레이커의 크기다. 이걸 굴착기 등급으로 읽으면 1.0㎥ 굴착기(87만원/일)가
+    // 붙어 장비비가 크게 부풀었다.
+    expect(matchEquipmentAll('대형브레이커', '굴삭기 부착')).toEqual([
+      'EXCAVATOR_06',
+      'BREAKER_07',
+    ]);
+  });
+
+  it('굴착기가 여러 대여도 주력 1대만 전 기간으로 잡는다', () => {
+    const one = estimateDemolitionCost({
+      wasteByClass: [{ wasteClass: 'CONCRETE', estimatedKg: 100_000, separable: true }],
+      workDays: 10,
+      crewSize: 4,
+      equipment: [{ name: '굴착기', spec: '0.6㎥' }],
+    });
+    const three = estimateDemolitionCost({
+      wasteByClass: [{ wasteClass: 'CONCRETE', estimatedKg: 100_000, separable: true }],
+      workDays: 10,
+      crewSize: 4,
+      equipment: [
+        { name: '굴착기', spec: '0.6㎥' },
+        { name: '굴착기', spec: '0.2㎥' },
+        { name: '굴착기', spec: '1.0㎥' },
+      ],
+    });
+    const eq = (r: ReturnType<typeof estimateDemolitionCost>) =>
+      r.lines.find((l) => l.key === 'EQUIPMENT')!.maxWon;
+    // 세 대여도 두 대는 보조(공기의 30%)로만 붙으므로 세 배가 되지 않는다.
+    expect(eq(three)).toBeLessThan(eq(one) * 2);
+    expect(eq(three)).toBeGreaterThan(eq(one));
+  });
+
+  it('철거 장비가 하나도 안 잡히면 장비비 줄을 만들지 않는다', () => {
+    const r = estimateDemolitionCost({
+      wasteByClass: [{ wasteClass: 'CONCRETE', estimatedKg: 10_000, separable: true }],
+      workDays: 3,
+      crewSize: 3,
+      equipment: [{ name: '고소작업대', spec: '10m' }],
+    });
+    expect(r.lines.map((l) => l.key)).not.toContain('EQUIPMENT');
+  });
+});

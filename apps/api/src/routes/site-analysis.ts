@@ -33,7 +33,7 @@ import {
  * 캐시 키에 섞는 분석 계약 버전. 프롬프트·스키마·파서를 바꿔 결과 모양이 달라지면
  * 이 값을 올려 옛 캐시를 통째로 무효화한다(안 올리면 옛 형식이 하루 더 돌아다닌다).
  */
-const ANALYSIS_CONTRACT_VERSION = 'v5-cost-aware';
+const ANALYSIS_CONTRACT_VERSION = 'v6-scale-anchored';
 
 /**
  * 현장 사진 AI 분석 API (로드맵 Phase 6).

@@ -242,10 +242,14 @@ export function matchEquipmentAll(name: string, spec?: string): EquipmentCode[] 
   const text = `${name} ${spec ?? ''}`.toLowerCase();
   const out: EquipmentCode[] = [];
 
-  const carrier = matchExcavator(text);
+  const pulverizer = /압쇄|펄버|크러셔|crusher/.test(text);
+  const breaker = /브레이커|breaker|함마|햄머/.test(text);
+  // "대형브레이커" 의 '대형' 은 브레이커의 크기지 그걸 단 굴착기의 크기가 아니다.
+  // 부착장비가 함께 적힌 줄에서는 크기 낱말로 모기계 등급을 추정하지 않는다.
+  const carrier = matchExcavator(text, { ignoreSizeWords: pulverizer || breaker });
   if (carrier) out.push(carrier);
-  if (/압쇄|펄버|크러셔|crusher/.test(text)) out.push('PULVERIZER_10');
-  if (/브레이커|breaker|함마|햄머/.test(text)) out.push('BREAKER_07');
+  if (pulverizer) out.push('PULVERIZER_10');
+  if (breaker) out.push('BREAKER_07');
 
   // 부착장비만 적혀 있어도 그걸 달 굴착기가 반드시 있어야 한다.
   if (out.length > 0 && !out.some((c) => c.startsWith('EXCAVATOR'))) out.unshift('EXCAVATOR_06');
@@ -253,7 +257,10 @@ export function matchEquipmentAll(name: string, spec?: string): EquipmentCode[] 
 }
 
 /** 굴착기 등급 판정. 규격 숫자가 없으면 크기 낱말(소형·중형·대형)로 본다. */
-function matchExcavator(text: string): EquipmentCode | undefined {
+function matchExcavator(
+  text: string,
+  opts: { ignoreSizeWords?: boolean } = {},
+): EquipmentCode | undefined {
   if (!/굴착기|굴삭기|포크레인|excavator|백호/.test(text)) return undefined;
 
   // 규격 표기가 여러 갈래다: 0.6㎥ / 06W / 6W. 숫자를 먼저 본다.
@@ -266,8 +273,10 @@ function matchExcavator(text: string): EquipmentCode | undefined {
     if (bucket <= 0.75) return 'EXCAVATOR_06';
     return 'EXCAVATOR_10';
   }
-  if (/미니|소형|스키드|skid|mini/.test(text)) return 'EXCAVATOR_02';
-  if (/대형|large/.test(text)) return 'EXCAVATOR_10';
+  if (!opts.ignoreSizeWords) {
+    if (/미니|소형|스키드|skid|mini/.test(text)) return 'EXCAVATOR_02';
+    if (/대형|large/.test(text)) return 'EXCAVATOR_10';
+  }
   return 'EXCAVATOR_06'; // 소규모 철거의 표준 장비
 }
 
@@ -483,31 +492,56 @@ export function estimateDemolitionCost(input: CostEstimateInput): CostEstimate {
   }
 
   // ── 4. 장비비 ───────────────────────────────────────────────────────────
-  let equipDaily = 0;
-  const equipDetail: string[] = [];
-  const seen = new Set<EquipmentCode>();
+  const codes = new Set<EquipmentCode>();
   for (const e of input.equipment ?? []) {
-    for (const code of matchEquipmentAll(e.name, e.spec)) {
-      if (seen.has(code)) continue;
-      seen.add(code);
-      const rate = EQUIPMENT_RATES[code]!;
-      const daily = equipmentDailyWon(rate);
-      equipDaily += daily;
-      equipDetail.push(
-        `${rate.label} ${rate.spec} ${won(daily)}/일` +
-          (rate.operator ? ' (손료·연료·잡재료+조종원)' : ' (부착장비, 손료)'),
-      );
-    }
+    for (const code of matchEquipmentAll(e.name, e.spec)) codes.add(code);
   }
-  if (equipDaily > 0 && days > 0) {
-    // 장비는 공기 내내 붙어 있지 않다. 하한은 공기의 60%, 상한은 전 기간으로 본다.
+  // 굴착기가 여러 대 제안돼도 소규모 현장에 세 대가 공기 내내 서 있지는 않는다.
+  // 주력 1대(가장 큰 것)와 그 부착장비는 전 기간, 나머지 굴착기는 보조로 들어왔다 나가므로
+  // 공기의 일부만 계상한다. 전부 전 기간으로 잡으면 장비비가 두세 배로 부풀어 견적이 무너진다.
+  const SUPPORT_SHARE = 0.3;
+  const excavators = [...codes]
+    .filter((c) => c.startsWith('EXCAVATOR'))
+    .sort((a, b) => equipmentDailyWon(EQUIPMENT_RATES[b]!) - equipmentDailyWon(EQUIPMENT_RATES[a]!));
+  const attachments = [...codes].filter((c) => !c.startsWith('EXCAVATOR'));
+
+  let fullDaily = 0;
+  let supportDaily = 0;
+  const equipDetail: string[] = [];
+  const describe = (code: EquipmentCode, share: string) => {
+    const rate = EQUIPMENT_RATES[code]!;
+    equipDetail.push(
+      `${rate.label} ${rate.spec} ${won(equipmentDailyWon(rate))}/일 ${share}` +
+        (rate.operator ? ' · 손료+연료+잡재료+조종원' : ' · 부착장비 손료'),
+    );
+  };
+  excavators.forEach((code, i) => {
+    const daily = equipmentDailyWon(EQUIPMENT_RATES[code]!);
+    if (i === 0) {
+      fullDaily += daily;
+      describe(code, '(주력, 전 기간)');
+    } else {
+      supportDaily += daily;
+      describe(code, `(보조, 공기의 ${Math.round(SUPPORT_SHARE * 100)}%)`);
+    }
+  });
+  for (const code of attachments) {
+    fullDaily += equipmentDailyWon(EQUIPMENT_RATES[code]!);
+    describe(code, '(주력에 부착, 전 기간)');
+  }
+
+  if (fullDaily > 0 && days > 0) {
+    // 주력 장비도 공기 내내 돌지는 않는다(해체 전 조사·마감재 뜯기 구간). 하한은 60%.
     const minDays = Math.max(1, Math.round(days * 0.6));
-    equipDetail.push(`가동 ${minDays}~${days}일 (경유 ${won(DIESEL_WON_PER_LITER)}/ℓ 기준, 1일 8시간)`);
+    const supportDays = Math.max(1, Math.round(days * SUPPORT_SHARE));
+    equipDetail.push(
+      `주력 가동 ${minDays}~${days}일 (경유 ${won(DIESEL_WON_PER_LITER)}/ℓ 기준, 1일 8시간)`,
+    );
     lines.push({
       key: 'EQUIPMENT',
       label: '장비비',
-      minWon: round1000(equipDaily * minDays),
-      maxWon: round1000(equipDaily * days),
+      minWon: round1000(fullDaily * minDays + supportDaily * supportDays),
+      maxWon: round1000(fullDaily * days + supportDaily * supportDays),
       detail: equipDetail,
       source: PRICE_SOURCES.equipment,
     });

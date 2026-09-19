@@ -272,7 +272,7 @@ export function SiteAnalysisScreen() {
     }
   }
 
-  function openLegal(page: 'privacy' | 'terms') {
+  function openPage(page: 'privacy' | 'terms' | 'judge') {
     void Linking.openURL(`/${page}.html`);
   }
 
@@ -536,12 +536,16 @@ export function SiteAnalysisScreen() {
             이용할 수 있습니다.
           </Text>
           <View style={styles.legalLinks}>
-            <Text style={styles.legalLink} onPress={() => openLegal('privacy')}>
+            <Text style={styles.legalLink} onPress={() => openPage('privacy')}>
               개인정보처리방침
             </Text>
             <Text style={styles.legalDot}>·</Text>
-            <Text style={styles.legalLink} onPress={() => openLegal('terms')}>
+            <Text style={styles.legalLink} onPress={() => openPage('terms')}>
               이용약관
+            </Text>
+            <Text style={styles.legalDot}>·</Text>
+            <Text style={styles.legalLink} onPress={() => openPage('judge')}>
+              체험 안내
             </Text>
           </View>
         </View>

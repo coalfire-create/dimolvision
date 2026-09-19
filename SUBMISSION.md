@@ -26,6 +26,9 @@ https://dimolvision.vercel.app
 
 두 문서는 서비스 화면 하단에서도 바로 열 수 있다.
 
+> **심사·체험 안내 페이지**: https://dimolvision.vercel.app/judge.html
+> 체험 순서와 확인 포인트를 한 장에 정리해 두었습니다.
+
 ## 심사위원·투표자 체험 방법 (30초)
 
 1. https://dimolvision.vercel.app 접속 — 로그인 화면 없이 바로 분석 화면이 뜬다.

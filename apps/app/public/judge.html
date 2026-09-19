@@ -1,0 +1,181 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>심사·체험 안내 — 디몰비전</title>
+    <meta name="description" content="디몰비전을 로그인 없이 30초 만에 체험하는 방법과 확인 포인트." />
+    <link rel="icon" href="/favicon.ico" />
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #ffffff;
+        --card: #f6f7f9;
+        --text: #1a1a1a;
+        --muted: #595959;
+        --border: #dce3f0;
+        --primary: #2c55e9;
+        --soft: #eaeffd;
+        --warn: #b45309;
+        --warnbg: #fffbeb;
+        --warnbd: #fde68a;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--text);
+        font-family: -apple-system, BlinkMacSystemFont, 'Apple SD Gothic Neo', 'Pretendard',
+          'Malgun Gothic', system-ui, sans-serif;
+        line-height: 1.65;
+        -webkit-text-size-adjust: 100%;
+      }
+      .wrap { max-width: 760px; margin: 0 auto; padding-block: 40px; padding-left: 20px; padding-right: 20px; }
+      a { color: var(--primary); }
+      .eyebrow { color: var(--primary); font-size: 13px; font-weight: 800; letter-spacing: 0.04em; }
+      h1 { font-size: 27px; margin: 6px 0 10px; letter-spacing: -0.02em; line-height: 1.3; }
+      .lead { color: var(--muted); font-size: 15px; margin: 0 0 24px; }
+      .cta {
+        display: inline-block; background: var(--primary); color: #fff; text-decoration: none;
+        font-weight: 800; font-size: 16px; padding: 15px 26px; border-radius: 14px;
+      }
+      .nologin {
+        display: flex; gap: 8px; align-items: center; background: #ecfdf5; border: 1px solid #a7f3d0;
+        color: #065f46; border-radius: 12px; padding: 12px 14px; margin: 18px 0 28px;
+        font-weight: 700; font-size: 14px;
+      }
+      h2 { font-size: 18px; margin: 34px 0 12px; padding-bottom: 8px; border-bottom: 2px solid var(--primary); }
+      ol.steps { counter-reset: s; list-style: none; padding: 0; margin: 0; }
+      ol.steps li {
+        counter-increment: s; position: relative; padding-left: 44px; margin-bottom: 18px;
+      }
+      ol.steps li::before {
+        content: counter(s); position: absolute; left: 0; top: 0;
+        width: 30px; height: 30px; border-radius: 50%; background: var(--primary); color: #fff;
+        display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 14px;
+      }
+      ol.steps b { display: block; font-size: 15px; }
+      ol.steps span { color: var(--muted); font-size: 14px; }
+      .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 12px; }
+      .card { background: var(--card); border: 1px solid var(--border); border-radius: 14px; padding: 16px; }
+      .card h3 { margin: 0 0 6px; font-size: 15px; }
+      .card p { margin: 0; color: var(--muted); font-size: 13.5px; line-height: 1.6; }
+      .note { background: var(--warnbg); border: 1px solid var(--warnbd); border-radius: 12px; padding: 14px 16px; }
+      .note p { margin: 0; color: #78350f; font-size: 14px; }
+      .note b { color: var(--warn); }
+      table { border-collapse: collapse; width: 100%; font-size: 14px; }
+      th, td { border: 1px solid var(--border); padding: 9px 11px; text-align: left; }
+      th { background: var(--card); width: 40%; }
+      footer { margin-top: 44px; border-top: 1px solid var(--border); padding-top: 18px; color: var(--muted); font-size: 13px; }
+      .scroll { overflow-x: auto; }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <div class="eyebrow">디몰비전 (DimolVision)</div>
+      <h1>철거 현장 사진 한 장으로<br />견적의 출발점을 만듭니다</h1>
+      <p class="lead">
+        소재 식별 · 철거 공정 · 위험요소 경고 · 폐기물 물량과 운반 트럭 대수까지.
+        아래 버튼을 누르면 바로 체험할 수 있습니다.
+      </p>
+
+      <a class="cta" href="/">서비스 체험하기 →</a>
+
+      <div class="nologin">
+        ✓ 회원가입·로그인 없이 모든 기능을 이용할 수 있습니다. 테스트 계정이 필요 없습니다.
+      </div>
+
+      <h2>30초 체험 순서</h2>
+      <ol class="steps">
+        <li>
+          <b>샘플 사진 한 장 누르기</b>
+          <span>
+            상단 “사진이 없으신가요? 바로 체험해 보세요”에서 3장 중 하나를 클릭합니다.
+            실제 철거 현장 사진이며, 누르는 즉시 AI 분석이 시작됩니다(약 10~20초).
+          </span>
+        </li>
+        <li>
+          <b>분석 리포트 확인</b>
+          <span>
+            구성 소재와 예상 중량, 권장 철거 공정, 안전 위험요소가 순서대로 나옵니다.
+            결과 상단 칩이 <b>AI 실시간 분석</b>이면 그 사진을 방금 모델이 분석한 것입니다.
+          </span>
+        </li>
+        <li>
+          <b>건물 정보를 넣고 다시 분석</b>
+          <span>
+            연면적에 <b>40</b>, 건축년도에 <b>1985</b>를 넣고 “면적 반영해 다시 분석”을 누르면
+            예상 톤수·운반 트럭 대수와 함께 <b>견적 기초자료</b>가 추가됩니다.
+            1985년은 석면 사용 금지(2009년) 이전이라 석면 의심 판단이 달라지는 것도 보실 수 있습니다.
+          </span>
+        </li>
+        <li>
+          <b>직접 찍은 사진으로도 테스트</b>
+          <span>
+            “앨범에서 선택”으로 여러 장을 한 번에 올리면 종합 분석합니다.
+            사진이 많을수록 식별되는 소재가 늘어납니다.
+          </span>
+        </li>
+      </ol>
+
+      <h2>확인 포인트</h2>
+      <div class="grid">
+        <div class="card">
+          <h3>여러 장 종합 분석</h3>
+          <p>
+            한 장일 때보다 여러 장을 함께 보면 식별 소재가 늘어납니다. 한 각도에서만 보이는
+            자재를 다른 사진이 보완합니다.
+          </p>
+        </div>
+        <div class="card">
+          <h3>견적으로 이어지는 출력</h3>
+          <p>
+            “석고보드가 있습니다”에서 끝나지 않고 법정 폐기물 분류별 배출량, 투입 장비,
+            예상 공기·인력, 운반 트럭 대수까지 산출합니다.
+          </p>
+        </div>
+        <div class="card">
+          <h3>모르는 것을 밝히는 설계</h3>
+          <p>
+            내력벽 여부·지중 구조물·도로 폭처럼 사진으로 알 수 없는 항목을
+            <b>현장 실사 확인 목록</b>으로 따로 제시합니다.
+          </p>
+        </div>
+        <div class="card">
+          <h3>끊기지 않는 분석</h3>
+          <p>
+            여러 비전 모델을 우선순위로 시도해, 한 곳이 응답하지 못해도 다음이 이어받습니다.
+          </p>
+        </div>
+      </div>
+
+      <h2>석면을 다루는 방식</h2>
+      <div class="note">
+        <p>
+          석면은 사진만으로 판별할 수 없고, <b>석면안전관리법상 해체 전 전문기관 조사가 의무</b>입니다.
+          그래서 이 서비스는 “석면입니다 / 석면이 없습니다” 같은 확정 표현을 절대 출력하지 않습니다.
+          모델이 확정 표현을 내더라도 응답 단계에서 “석면 의심 · 전문 조사 필요”로 교정합니다.
+        </p>
+      </div>
+
+      <h2>제출 정보</h2>
+      <div class="scroll">
+        <table>
+          <tbody>
+            <tr><th>서비스 URL</th><td><a href="/">https://dimolvision.vercel.app</a></td></tr>
+            <tr><th>로그인</th><td>없음 (상시 무로그인 이용)</td></tr>
+            <tr><th>테스트 계정</th><td>불필요</td></tr>
+            <tr><th>수집하는 개인정보</th><td>없음. 업로드 사진은 저장하지 않고 분석 후 폐기</td></tr>
+            <tr><th>개인정보처리방침</th><td><a href="/privacy.html">/privacy.html</a></td></tr>
+            <tr><th>이용약관</th><td><a href="/terms.html">/terms.html</a></td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <footer>
+        <a href="/">← 서비스로 이동</a> · <a href="/privacy.html">개인정보처리방침</a> ·
+        <a href="/terms.html">이용약관</a>
+      </footer>
+    </div>
+  </body>
+</html>

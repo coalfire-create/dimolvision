@@ -8,6 +8,7 @@ import {
 } from '../site-analysis/analyzer.js';
 import type { VolumeEstimator } from '../estimation/provider.js';
 import type { BuildingRegisterClient } from '../public-data/building-register.js';
+import type { ParcelLookupClient } from '../geo/parcel.js';
 import {
   reconQuality,
   scaleDimensions,
@@ -47,6 +48,8 @@ export interface SiteAnalysisRouterOptions {
   cache?: AnalysisCacheStore;
   /** 3D 복원 클라이언트(선택). 없으면 복원 엔드포인트가 503 을 낸다. */
   recon?: ReconstructionClient;
+  /** 좌표 → 지번 변환(선택). 지도에서 주소를 찍는 기능에 쓴다. */
+  parcel?: ParcelLookupClient;
   /** 공급자 1곳당 시도 횟수(1 = 재시도 없음). 기본 2 — 일시적 429/503 을 한 번 더 받아준다. */
   attemptsPerAnalyzer?: number;
   /** 재시도 전 대기(ms). 기본 700. */
@@ -64,6 +67,7 @@ export function createSiteAnalysisRouter(
   const retryDelayMs = options.retryDelayMs ?? 700;
   const cache = options.cache;
   const recon = options.recon;
+  const parcel = options.parcel;
   const router = Router();
 
   function parseInput(body: Record<string, unknown>): AnalyzeSiteInput {
@@ -309,6 +313,25 @@ export function createSiteAnalysisRouter(
       quality,
       ...(dimensions ? { dimensions } : {}),
     });
+  });
+
+  /**
+   * GET /api/geo/parcel?lat=&lng=
+   * 지도에서 찍은 좌표를 건축물대장 조회용 지번 코드로 옮긴다.
+   */
+  router.get('/geo/parcel', async (req, res) => {
+    if (!parcel) {
+      res.status(503).json({ error: '주소 변환이 설정되지 않았습니다(KAKAO_REST_API_KEY).' });
+      return;
+    }
+    const lat = Number(req.query.lat);
+    const lng = Number(req.query.lng);
+    const found = await parcel.lookup(lat, lng);
+    if (!found) {
+      res.status(404).json({ error: '해당 위치의 지번을 찾지 못했습니다. 건물 위를 다시 찍어 주세요.' });
+      return;
+    }
+    res.json(found);
   });
 
   return router;

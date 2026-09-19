@@ -14,6 +14,7 @@ import { env, activeVisionProvider } from './config/env.js';
 import { BuildingRegisterClient } from './public-data/building-register.js';
 import { createAnalysisCache, type AnalysisCacheStore } from './cache/analysis-cache.js';
 import { ReconstructionClient } from './recon/reconstruction.js';
+import { ParcelLookupClient } from './geo/parcel.js';
 
 /**
  * 디몰비전 API(경량형) — 현장 사진 → 소재/공정/위험 분석 + 물량 추정.
@@ -88,6 +89,7 @@ export function createApp() {
       provider: activeVisionProvider(),
       publicData: { buildingRegister: Boolean(env.publicData.serviceKey) },
       recon: Boolean(env.recon.baseUrl),
+      mapPicker: Boolean(env.kakao.restApiKey),
     });
   });
 
@@ -125,9 +127,22 @@ export function createApp() {
       })
     : undefined;
 
+  // 지도에서 찍은 좌표를 지번으로 옮기는 변환(키가 있을 때만).
+  const parcel = env.kakao.restApiKey
+    ? new ParcelLookupClient({
+        restApiKey: env.kakao.restApiKey,
+        timeoutMs: env.kakao.timeoutMs,
+      })
+    : undefined;
+
   app.use(
     '/api',
-    createSiteAnalysisRouter(chain, new HeuristicVolumeEstimator(), { cache, recon }, registry),
+    createSiteAnalysisRouter(
+      chain,
+      new HeuristicVolumeEstimator(),
+      { cache, recon, parcel },
+      registry,
+    ),
   );
 
   return app;

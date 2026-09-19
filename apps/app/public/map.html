@@ -1,0 +1,182 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>지도에서 현장 선택 — 디몰비전</title>
+    <link rel="icon" href="/favicon.ico" />
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css" />
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #fff; --card: #f6f7f9; --text: #1a1a1a; --muted: #595959;
+        --border: #dce3f0; --primary: #2c55e9; --soft: #eaeffd;
+        --warnbg: #fffbeb; --warnbd: #fde68a;
+      }
+      * { box-sizing: border-box; }
+      html, body { height: 100%; }
+      body {
+        margin: 0; background: var(--bg); color: var(--text); line-height: 1.6;
+        font-family: -apple-system, BlinkMacSystemFont, 'Apple SD Gothic Neo', 'Pretendard',
+          'Malgun Gothic', system-ui, sans-serif;
+        display: flex; flex-direction: column; -webkit-text-size-adjust: 100%;
+      }
+      header {
+        padding: 12px 16px; border-bottom: 1px solid var(--border);
+        display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap;
+      }
+      header h1 { font-size: 16px; margin: 0; }
+      header span { font-size: 12px; color: var(--muted); }
+      #map { flex: 1; min-height: 240px; }
+      .panel { border-top: 1px solid var(--border); padding: 14px 16px; background: var(--bg); }
+      .inner { max-width: 720px; margin: 0 auto; }
+      .searchRow { display: flex; gap: 8px; margin-bottom: 10px; }
+      .searchRow input {
+        flex: 1; padding: 11px 12px; border: 1.5px solid var(--border);
+        border-radius: 10px; font-size: 15px; color: var(--text); background: #fff;
+      }
+      .searchRow button { width: auto; padding: 11px 16px; margin: 0; font-size: 14px; }
+      .addr { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; font-size: 14px; }
+      .addr b { display: block; font-size: 15px; margin-bottom: 2px; }
+      .addr .codes { color: var(--muted); font-size: 12px; margin-top: 6px; font-variant-numeric: tabular-nums; }
+      .hint { color: var(--muted); font-size: 13px; }
+      button {
+        width: 100%; padding: 14px; border: 0; border-radius: 12px; background: var(--primary);
+        color: #fff; font-size: 16px; font-weight: 800; cursor: pointer; margin-top: 10px;
+      }
+      button:disabled { background: #a8b6e8; cursor: default; }
+      .note { background: var(--warnbg); border: 1px solid var(--warnbd); border-radius: 10px;
+              padding: 11px 13px; font-size: 13px; color: #78350f; margin-top: 10px; }
+      a { color: var(--primary); }
+      .hidden { display: none !important; }
+      .pin {
+        width: 18px; height: 18px; border-radius: 50%; background: var(--primary);
+        border: 3px solid #fff; box-shadow: 0 0 0 1px rgba(0,0,0,.25);
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>지도에서 현장 선택</h1>
+      <span>건물을 눌러 주소를 지정하세요</span>
+    </header>
+
+    <div id="map"></div>
+
+    <div class="panel">
+      <div class="inner">
+        <div class="searchRow">
+          <input id="q" type="text" placeholder="지역명으로 이동 (예: 종로구 청운동)" />
+          <button id="find" style="width:auto">이동</button>
+        </div>
+
+        <div id="addrBox" class="addr hidden"></div>
+        <p id="hint" class="hint">지도를 움직여 철거할 건물 위를 눌러 주세요.</p>
+
+        <button id="use" disabled>이 주소로 분석하기</button>
+        <div id="note" class="note hidden"></div>
+      </div>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+    <script>
+      const $ = (id) => document.getElementById(id);
+      let picked = null;
+      let marker = null;
+
+      // 지도 타일은 키가 필요 없는 OSM 을 쓴다. 좌표를 얻는 데 목적이 있고,
+      // 지번 변환은 서버가 카카오 로컬 API 로 처리한다.
+      const map = L.map('map', { zoomControl: true }).setView([37.5665, 126.978], 16);
+      L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        maxZoom: 19,
+        attribution: '&copy; OpenStreetMap contributors',
+      }).addTo(map);
+
+      // 현재 위치가 잡히면 거기서 시작한다(현장에서 열었을 가능성이 높다).
+      navigator.geolocation?.getCurrentPosition(
+        (p) => map.setView([p.coords.latitude, p.coords.longitude], 18),
+        () => {},
+        { timeout: 4000 },
+      );
+
+      const pinIcon = L.divIcon({ className: '', html: '<div class="pin"></div>', iconSize: [18, 18], iconAnchor: [9, 9] });
+
+      async function pick(lat, lng) {
+        $('hint').textContent = '주소를 확인하는 중…';
+        $('use').disabled = true;
+        $('note').classList.add('hidden');
+
+        if (marker) marker.remove();
+        marker = L.marker([lat, lng], { icon: pinIcon }).addTo(map);
+
+        try {
+          const res = await fetch(`/api/geo/parcel?lat=${lat}&lng=${lng}`);
+          if (res.status === 503) {
+            $('addrBox').classList.add('hidden');
+            $('hint').textContent = '';
+            $('note').classList.remove('hidden');
+            $('note').innerHTML =
+              '<b>주소 변환이 아직 설정되지 않았습니다.</b> 좌표는 찍었지만 건축물대장 조회에 필요한 ' +
+              '지번 코드로 옮기려면 카카오 REST API 키가 필요합니다. ' +
+              '설정 전까지는 분석 화면에서 연면적·건축년도를 직접 입력해 주세요.';
+            return;
+          }
+          if (!res.ok) {
+            $('addrBox').classList.add('hidden');
+            $('hint').textContent = '해당 위치의 지번을 찾지 못했습니다. 건물 위를 다시 눌러 주세요.';
+            return;
+          }
+          picked = await res.json();
+          $('hint').textContent = '';
+          $('addrBox').classList.remove('hidden');
+          $('addrBox').innerHTML =
+            `<b>${picked.jibunAddress || '(지번 없음)'}</b>` +
+            (picked.roadAddress ? `<div class="hint">${picked.roadAddress}</div>` : '') +
+            `<div class="codes">시군구 ${picked.sigunguCd} · 법정동 ${picked.bjdongCd} · ` +
+            `번 ${picked.bun} · 지 ${picked.ji}${picked.platGbCd === '1' ? ' · 산' : ''}</div>`;
+          $('use').disabled = false;
+        } catch {
+          $('hint').textContent = '주소를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.';
+        }
+      }
+
+      map.on('click', (e) => pick(e.latlng.lat, e.latlng.lng));
+
+      // 지역명 이동 — OSM Nominatim 은 키가 필요 없다. 정확한 지번은 서버가 다시 변환하므로
+      // 여기서는 "그 동네로 지도를 옮기는" 용도로만 쓴다.
+      async function findPlace() {
+        const q = $('q').value.trim();
+        if (!q) return;
+        $('find').disabled = true;
+        try {
+          const r = await fetch(
+            `https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=kr&q=${encodeURIComponent(q)}`,
+            { headers: { 'Accept-Language': 'ko' } },
+          );
+          const list = await r.json();
+          if (list[0]) map.setView([parseFloat(list[0].lat), parseFloat(list[0].lon)], 17);
+          else $('hint').textContent = '해당 지역을 찾지 못했습니다. 다른 이름으로 시도해 주세요.';
+        } catch {
+          $('hint').textContent = '검색에 실패했습니다. 지도를 직접 움직여 주세요.';
+        } finally {
+          $('find').disabled = false;
+        }
+      }
+      $('find').addEventListener('click', findPlace);
+      $('q').addEventListener('keydown', (e) => { if (e.key === 'Enter') findPlace(); });
+
+      // 선택한 주소를 분석 화면으로 넘긴다. 쿼리로 넘기면 앱이 읽어 자동으로 채운다.
+      $('use').addEventListener('click', () => {
+        if (!picked) return;
+        const p = new URLSearchParams({
+          sigunguCd: picked.sigunguCd,
+          bjdongCd: picked.bjdongCd,
+          bun: picked.bun,
+          ji: picked.ji,
+          addr: picked.jibunAddress || '',
+        });
+        location.href = `/?${p.toString()}`;
+      });
+    </script>
+  </body>
+</html>

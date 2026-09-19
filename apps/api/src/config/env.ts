@@ -47,6 +47,15 @@ export const env = {
     visionTimeoutMs: Number(process.env.VISION_TIMEOUT_MS ?? 30_000),
   },
   /**
+   * 카카오 로컬 API — 지도에서 찍은 좌표를 지번(법정동코드·본번·부번)으로 옮긴다.
+   * 건축물대장이 주소 문자열을 받지 않아 이 변환이 필요하다.
+   * 발급: https://developers.kakao.com → 앱 생성 → REST API 키
+   */
+  kakao: {
+    restApiKey: process.env.KAKAO_REST_API_KEY,
+    timeoutMs: Number(process.env.KAKAO_TIMEOUT_MS ?? 5_000),
+  },
+  /**
    * 3D 복원 서비스(Cloud Run GPU 위의 COLMAP). 없으면 복원 기능이 꺼진다.
    * COLMAP 은 수 분이 걸리므로 비전 분석과 타임아웃을 공유하지 않는다.
    */

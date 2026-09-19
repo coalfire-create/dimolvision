@@ -23,7 +23,12 @@ import {
   type SiteQuoteBasis,
   type VolumeEstimate,
 } from '@dimol/shared';
-import { ApiError, analyzeSite, analyzeSiteWasteItems } from '../api/client';
+import {
+  ApiError,
+  analyzeSite,
+  analyzeSiteWasteItems,
+  type BuildingRegisterInfo,
+} from '../api/client';
 import { AppIcon } from '../components/AppIcon';
 import { CameraCaptureModal, type CapturedPhoto } from '../components/CameraCaptureModal';
 import { AppButton, Card, ErrorBanner, StickyFooter } from '../components/ui';
@@ -135,6 +140,48 @@ interface PickedImage {
   uri: string;
 }
 
+/** 지도(/map.html)에서 찍어 넘어온 지번. 건축물대장 조회에 필요한 네 값과 표시용 주소. */
+interface PickedParcel {
+  sigunguCd: string;
+  bjdongCd: string;
+  bun: string;
+  ji: string;
+  address: string;
+}
+
+/**
+ * 주소 창의 쿼리에서 지번을 읽는다.
+ * 코드가 규격(각 5자리)에 맞지 않으면 버린다 — 틀린 코드로 대장을 조회하면
+ * 엉뚱한 건물의 연면적·구조가 견적에 섞여 들어간다.
+ */
+function readParcelFromUrl(): PickedParcel | null {
+  if (Platform.OS !== 'web' || typeof window === 'undefined') return null;
+  const q = new URLSearchParams(window.location.search);
+  const sigunguCd = q.get('sigunguCd') ?? '';
+  const bjdongCd = q.get('bjdongCd') ?? '';
+  if (!/^\d{5}$/.test(sigunguCd) || !/^\d{5}$/.test(bjdongCd)) return null;
+  const pad = (v: string | null) => (/^\d{1,4}$/.test(v ?? '') ? (v as string).padStart(4, '0') : '0000');
+  return {
+    sigunguCd,
+    bjdongCd,
+    bun: pad(q.get('bun')),
+    ji: pad(q.get('ji')),
+    address: (q.get('addr') ?? '').trim(),
+  };
+}
+
+/** 대장에서 실제로 받은 값만 칩으로 보여 준다 — 비어 있는 항목을 지어내지 않는다. */
+function registerChips(r: BuildingRegisterInfo): string[] {
+  const out: string[] = [];
+  if (r.buildingName) out.push(r.buildingName);
+  if (r.structureName) out.push(r.structureName);
+  if (r.totalFloorAreaM2) out.push(`연면적 ${Math.round(r.totalFloorAreaM2)}㎡`);
+  if (r.floorsAbove) out.push(`지상 ${r.floorsAbove}층`);
+  if (r.approvedYear) out.push(`${r.approvedYear}년 사용승인`);
+  if (r.mainUse) out.push(r.mainUse);
+  return out;
+}
+
 function mimeFromUri(uri: string): string {
   return uri.toLowerCase().endsWith('.png') ? 'image/png' : 'image/jpeg';
 }
@@ -157,6 +204,20 @@ export function SiteAnalysisScreen() {
   /** 건축년도(사용승인). 2009년 석면 사용 금지 이전이면 AI 가 석면 의심을 가중한다. */
   const [buildYear, setBuildYear] = useState('');
   const [estimate, setEstimate] = useState<VolumeEstimate | null>(null);
+  /**
+   * 지도에서 찍은 현장 주소. 지번 코드가 함께 가면 서버가 건축물대장을 조회해
+   * 주구조·연면적·사용승인연도를 채운다 — 사용자가 몰라도 되는 값들이다.
+   */
+  const [parcel, setParcel] = useState<PickedParcel | null>(null);
+  /** 대장 조회 결과. 무엇이 자동으로 반영됐는지 화면에 근거로 보여 준다. */
+  const [register, setRegister] = useState<BuildingRegisterInfo | null>(null);
+
+  // 지도 페이지가 선택한 지번을 쿼리로 넘겨준다.
+  useEffect(() => {
+    const found = readParcelFromUrl();
+    if (found) setParcel(found);
+  }, []);
+
 
   function applyAssets(assets: ImagePicker.ImagePickerAsset[]) {
     const picked = assets
@@ -221,17 +282,34 @@ export function SiteAnalysisScreen() {
     const payload = shots.map((i) => ({ imageBase64: i.base64, mimeType: i.mimeType }));
     const area = floorAreaM2();
     const year = buildingYear();
+    // 지도에서 주소를 찍었으면 지번 코드를 함께 보낸다 — 서버가 대장을 조회해 힌트를 채운다.
+    const addr = parcel
+      ? {
+          sigunguCd: parcel.sigunguCd,
+          bjdongCd: parcel.bjdongCd,
+          bun: parcel.bun,
+          ji: parcel.ji,
+        }
+      : {};
     if (area === undefined) {
       setEstimate(null);
-      setResult(await analyzeSite({ images: payload, ...(year ? { buildingYear: year } : {}) }));
+      const r = await analyzeSite({
+        images: payload,
+        ...addr,
+        ...(year ? { buildingYear: year } : {}),
+      });
+      setRegister((r as { buildingRegister?: BuildingRegisterInfo }).buildingRegister ?? null);
+      setResult(r);
       return;
     }
     const r = await analyzeSiteWasteItems({
       images: payload,
       floorAreaM2: area,
+      ...addr,
       ...(structure ? { structure } : {}),
       ...(year ? { buildingYear: year } : {}),
     });
+    setRegister(r.buildingRegister ?? null);
     setEstimate(r.estimate ?? null);
     setResult(r.analysis);
   }
@@ -274,6 +352,11 @@ export function SiteAnalysisScreen() {
 
   function openPage(page: 'privacy' | 'terms' | 'judge') {
     void Linking.openURL(`/${page}.html`);
+  }
+
+  /** 지도에서 현장을 찍는 화면. 고른 지번은 쿼리로 돌아와 이 화면이 다시 읽는다. */
+  function openMap() {
+    void Linking.openURL('/map.html');
   }
 
   return (
@@ -443,6 +526,44 @@ export function SiteAnalysisScreen() {
               </View>
               <Text style={styles.actionCardTitle}>앨범에서 선택</Text>
               <Text style={styles.actionCardSub}>여러 장 선택 가능</Text>
+            </PressableScale>
+          </View>
+        </FadeInUp>
+
+        {/* 지도에서 현장을 찍으면 건축물대장이 붙는다 — 연면적·구조·연도를 손으로 몰라도 된다. */}
+        <FadeInUp delay={50}>
+          <View style={styles.addrCard}>
+            <View style={styles.addrHead}>
+              <AppIcon name="location" size={17} color={theme.colors.primary} />
+              <Text style={styles.addrTitle}>현장 주소 (선택)</Text>
+            </View>
+            {parcel ? (
+              <>
+                <Text style={styles.addrValue}>{parcel.address || '선택한 위치'}</Text>
+                <Text style={styles.addrCodes}>
+                  {`시군구 ${parcel.sigunguCd} · 법정동 ${parcel.bjdongCd} · ${Number(parcel.bun)}${
+                    Number(parcel.ji) > 0 ? `-${Number(parcel.ji)}` : ''
+                  }`}
+                </Text>
+              </>
+            ) : (
+              <Text style={styles.addrSub}>
+                지도에서 건물을 찍으면 건축물대장의 주구조·연면적·사용승인연도를 불러와 분석에 반영합니다.
+              </Text>
+            )}
+            {register ? (
+              <View style={styles.regRow}>
+                {registerChips(register).map((c) => (
+                  <View key={c} style={styles.regChip}>
+                    <Text style={styles.regChipText}>{c}</Text>
+                  </View>
+                ))}
+              </View>
+            ) : null}
+            <PressableScale style={styles.addrBtn} onPress={openMap} accessibilityRole="button">
+              <Text style={styles.addrBtnText}>
+                {parcel ? '주소 다시 선택' : '지도에서 현장 선택'}
+              </Text>
             </PressableScale>
           </View>
         </FadeInUp>
@@ -1304,6 +1425,39 @@ const styles = StyleSheet.create({
   },
 
   /* 연면적 입력 카드 */
+  /* 현장 주소(지도 선택) */
+  addrCard: {
+    backgroundColor: colors.background,
+    borderColor: colors.border,
+    borderWidth: 1,
+    borderRadius: radius.card,
+    padding: spacing.md,
+    marginTop: spacing.md,
+  },
+  addrHead: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  addrTitle: { color: colors.text, fontSize: font.bodyLarge, fontWeight: '800' },
+  addrSub: { color: colors.textMuted, fontSize: 13, marginTop: 4, lineHeight: 19 },
+  addrValue: { color: colors.text, fontSize: font.body, fontWeight: '700', marginTop: 6 },
+  addrCodes: { color: colors.textMuted, fontSize: 12, marginTop: 2 },
+  regRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: spacing.sm },
+  regChip: {
+    backgroundColor: colors.primarySoft,
+    borderRadius: radius.button,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+  },
+  regChipText: { color: colors.primary, fontSize: 12, fontWeight: '700' },
+  addrBtn: {
+    marginTop: spacing.sm,
+    alignItems: 'center',
+    paddingVertical: 11,
+    borderRadius: radius.button,
+    borderWidth: 1.5,
+    borderColor: colors.primary,
+    backgroundColor: colors.background,
+  },
+  addrBtnText: { color: colors.primary, fontSize: 14, fontWeight: '800' },
+
   areaCard: {
     backgroundColor: colors.background,
     borderColor: colors.border,

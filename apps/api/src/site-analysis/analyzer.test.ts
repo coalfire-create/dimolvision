@@ -8,6 +8,7 @@ import {
   SelfHostedVlmAnalyzer,
   SiteAnalysisValidationError,
   buildUserInstruction,
+  parseQuoteBasis,
   parseVisionJson,
   softenAsbestosClaims,
 } from './analyzer.js';
@@ -368,5 +369,67 @@ describe('SelfHostedVlmAnalyzer 출력 품질 설정', () => {
     expect(body.max_tokens).toBeGreaterThanOrEqual(3000);
     // 부위+자재 지시가 붙어야 "콘크리트" 대신 "바닥 콘크리트 슬래브" 가 나온다.
     expect(body.messages[1].content[0].text).toContain('부위 + 자재');
+  });
+});
+
+describe('견적 기초자료(quoteBasis) 파싱', () => {
+  const full = {
+    wasteByClass: [
+      { wasteClass: 'CONCRETE', estimatedKg: 15000, separable: true, note: '순환골재' },
+      { wasteClass: 'DESIGNATED', estimatedKg: 200, separable: false, note: '석면이 있습니다' },
+      { wasteClass: 'INVALID', estimatedKg: 500, separable: true },
+      { wasteClass: 'WOOD', estimatedKg: 0, separable: true },
+    ],
+    equipment: [
+      { name: '굴착기', spec: '06W 압쇄기', reason: '구조체 해체' },
+      { name: '', reason: '빈 이름은 버린다' },
+    ],
+    estimatedWorkDays: 5.4,
+    estimatedCrewSize: 4,
+    siteChecklist: ['내력벽 여부 확인', '', '지중 구조물 확인'],
+    costDrivers: ['석면 별도 처리'],
+  };
+
+  it('유효한 분류만 남기고 0kg 항목은 버린다', () => {
+    const q = parseQuoteBasis(full)!;
+    expect(q.wasteByClass.map((w) => w.wasteClass)).toEqual(['CONCRETE', 'DESIGNATED']);
+  });
+
+  it('분류별 비고에도 석면 확정 표현 가드가 걸린다', () => {
+    const q = parseQuoteBasis(full)!;
+    expect(q.wasteByClass[1]?.note).not.toMatch(/석면이 있습니다/);
+  });
+
+  it('공기·인원은 양의 정수로 정규화한다', () => {
+    const q = parseQuoteBasis(full)!;
+    expect(q.estimatedWorkDays).toBe(5);
+    expect(q.estimatedCrewSize).toBe(4);
+  });
+
+  it('이름 없는 장비와 빈 체크리스트 항목은 버린다', () => {
+    const q = parseQuoteBasis(full)!;
+    expect(q.equipment).toHaveLength(1);
+    expect(q.siteChecklist).toEqual(['내력벽 여부 확인', '지중 구조물 확인']);
+  });
+
+  it('아무것도 못 채웠으면 undefined — 빈 껍데기를 화면에 내지 않는다', () => {
+    expect(parseQuoteBasis({})).toBeUndefined();
+    expect(parseQuoteBasis(null)).toBeUndefined();
+    expect(parseQuoteBasis({ wasteByClass: [], equipment: [] })).toBeUndefined();
+  });
+
+  it('AI 응답 전체 파싱에서 quoteBasis 가 붙는다', () => {
+    const r = parseVisionJson(
+      JSON.stringify({
+        summary: '현장',
+        materials: [],
+        demolitionSteps: [],
+        hazards: [],
+        confidence: 'LOW',
+        quoteBasis: full,
+      }),
+    );
+    expect(r.quoteBasis?.wasteByClass).toHaveLength(2);
+    expect(r.quoteBasis?.siteChecklist).toHaveLength(2);
   });
 });

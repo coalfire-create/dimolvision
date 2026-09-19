@@ -1,8 +1,10 @@
 import {
   SITE_ANALYSIS_DISCLAIMER,
+  type ConstructionWasteClass,
   type DetectedMaterial,
   type DemolitionStep,
   type SiteAnalysis,
+  type SiteQuoteBasis,
 } from '@dimol/shared';
 
 /**
@@ -237,7 +239,7 @@ const SYSTEM_PROMPT = [
 
 const USER_INSTRUCTION = [
   '이 철거 현장 사진을 분석해 아래 JSON 스키마로만 답하세요(코드블록·설명 없이 JSON 객체 하나):',
-  '{"summary": string, "materials": [{"category": "CONCRETE|STEEL|BRICK|WOOD|GLASS|GYPSUM|INSULATION|ROOFING|TILE|HAZARD|OTHER", "name": string, "estimatedKg": number, "confidence": "LOW|MEDIUM|HIGH", "recyclable": boolean, "hazardous": boolean, "note"?: string}], "demolitionSteps": [{"order": number, "title": string, "description": string, "caution"?: string}], "hazards": string[], "confidence": "LOW|MEDIUM|HIGH"}',
+  '{"summary": string, "materials": [{"category": "CONCRETE|STEEL|BRICK|WOOD|GLASS|GYPSUM|INSULATION|ROOFING|TILE|HAZARD|OTHER", "name": string, "estimatedKg": number, "confidence": "LOW|MEDIUM|HIGH", "recyclable": boolean, "hazardous": boolean, "note"?: string}], "demolitionSteps": [{"order": number, "title": string, "description": string, "caution"?: string}], "hazards": string[], "confidence": "LOW|MEDIUM|HIGH", "quoteBasis": {"wasteByClass": [{"wasteClass": "CONCRETE|ASPHALT|BRICK_BLOCK|WOOD|PLASTIC|METAL|GLASS|BOARD|MIXED|DESIGNATED", "estimatedKg": number, "separable": boolean, "note"?: string}], "equipment": [{"name": string, "spec"?: string, "reason": string}], "estimatedWorkDays": number, "estimatedCrewSize": number, "siteChecklist": string[], "costDrivers": string[]}}',
   '',
   '작성 지침:',
   '- summary: 어떤 건물의 어떤 상태인지, 철거 난이도를 좌우하는 요소가 무엇인지 2~3문장.',
@@ -247,7 +249,80 @@ const USER_INSTRUCTION = [
   '  → 구조체 → 분리 반출 흐름을 현장 상황에 맞게 조정하세요.',
   '  caution 에는 그 단계에서 실제로 사고가 나는 지점을 적으세요(일반론 금지).',
   '- hazards: 이 현장에 실제로 보이는 위험만. 보이지 않는 위험을 나열하지 마세요.',
+  '',
+  '[quoteBasis — 철거업자가 견적과 시공계획을 잡는 데 쓰는 자료]',
+  '- wasteByClass: 소재를 건설폐기물 법정 분류로 묶어 분류별 kg 을 내세요. materials 의 합과 크게',
+  '  어긋나지 않아야 합니다. 분리 배출이 어려워 혼합으로 나갈 물량은 MIXED 로, 석면 의심은',
+  '  DESIGNATED 로 잡으세요. 혼합·지정은 처리 단가가 크게 높아 견적을 좌우합니다.',
+  '  separable 은 현장에서 실제로 분리해 배출할 수 있는지를 뜻합니다.',
+  '- equipment: 이 현장 규모·구조에 맞는 장비를 제안하세요(예: 굴착기 06W 압쇄기, 고소작업대).',
+  '  reason 에는 왜 그 장비가 필요한지 현장 근거를 쓰세요.',
+  '- estimatedWorkDays / estimatedCrewSize: 순수 철거 작업 기준의 현실적인 값.',
+  '- siteChecklist: **사진으로는 확인할 수 없어 현장 실사에서 반드시 봐야 할 항목**을 쓰세요.',
+  '  (예: 내력벽 여부, 지하층·지중 구조물, 도로 접근성과 장비 진입 폭, 인접 건물 이격거리,',
+  '  전기·가스·상하수 차단 여부, 석면 시료 채취 위치). 이게 견적의 오차를 만드는 지점입니다.',
+  '- costDrivers: 단가를 올리거나 내리는 요인을 쓰세요(석면 별도 처리, 양중 곤란, 야간작업 등).',
 ].join('\n');
+
+const WASTE_CLASSES = new Set<ConstructionWasteClass>([
+  'CONCRETE','ASPHALT','BRICK_BLOCK','WOOD','PLASTIC','METAL','GLASS','BOARD','MIXED','DESIGNATED',
+]);
+
+/**
+ * 견적 기초자료 정규화. 구형 응답이나 모델이 빠뜨린 경우 undefined 를 돌려
+ * 화면이 해당 섹션을 통째로 감추게 한다(빈 껍데기를 보여주지 않는다).
+ */
+export function parseQuoteBasis(raw: unknown): SiteQuoteBasis | undefined {
+  if (typeof raw !== 'object' || raw === null) return undefined;
+  const q = raw as Record<string, unknown>;
+  const strList = (v: unknown): string[] =>
+    Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string' && x.trim() !== '') : [];
+
+  const wasteByClass = (Array.isArray(q.wasteByClass) ? q.wasteByClass : [])
+    .map((w) => w as Record<string, unknown>)
+    .filter((w) => WASTE_CLASSES.has(w.wasteClass as ConstructionWasteClass))
+    .map((w) => ({
+      wasteClass: w.wasteClass as ConstructionWasteClass,
+      estimatedKg: typeof w.estimatedKg === 'number' ? Math.max(0, Math.round(w.estimatedKg)) : 0,
+      separable: w.separable !== false,
+      note: typeof w.note === 'string' ? softenAsbestosClaims(w.note) : undefined,
+    }))
+    .filter((w) => w.estimatedKg > 0);
+
+  const equipment = (Array.isArray(q.equipment) ? q.equipment : [])
+    .map((e) => e as Record<string, unknown>)
+    .filter((e) => typeof e.name === 'string' && e.name.trim() !== '')
+    .map((e) => ({
+      name: e.name as string,
+      spec: typeof e.spec === 'string' ? e.spec : undefined,
+      reason: typeof e.reason === 'string' ? e.reason : '',
+    }));
+
+  const siteChecklist = strList(q.siteChecklist).map(softenAsbestosClaims);
+  const costDrivers = strList(q.costDrivers).map(softenAsbestosClaims);
+
+  // 하나도 못 채웠으면 섹션 자체를 내지 않는다.
+  if (
+    wasteByClass.length === 0 &&
+    equipment.length === 0 &&
+    siteChecklist.length === 0 &&
+    costDrivers.length === 0
+  ) {
+    return undefined;
+  }
+
+  const posInt = (v: unknown): number | undefined =>
+    typeof v === 'number' && Number.isFinite(v) && v > 0 ? Math.round(v) : undefined;
+
+  return {
+    wasteByClass,
+    equipment,
+    estimatedWorkDays: posInt(q.estimatedWorkDays),
+    estimatedCrewSize: posInt(q.estimatedCrewSize),
+    siteChecklist,
+    costDrivers,
+  };
+}
 
 /** 모델 텍스트 응답에서 JSON 을 추출·검증해 SiteAnalysis 로 정규화(공급자 공용). */
 export function parseVisionJson(text: string): SiteAnalysis {
@@ -274,6 +349,7 @@ export function parseVisionJson(text: string): SiteAnalysis {
     hazards: Array.isArray(raw.hazards)
       ? raw.hazards.filter((h): h is string => typeof h === 'string').map(softenAsbestosClaims)
       : [],
+    quoteBasis: parseQuoteBasis((raw as { quoteBasis?: unknown }).quoteBasis),
     method: 'AI_VISION',
     confidence: raw.confidence === 'HIGH' || raw.confidence === 'MEDIUM' ? raw.confidence : 'LOW',
     disclaimer: SITE_ANALYSIS_DISCLAIMER,

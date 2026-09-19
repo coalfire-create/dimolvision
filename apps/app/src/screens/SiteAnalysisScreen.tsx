@@ -15,10 +15,12 @@ import * as ImagePicker from 'expo-image-picker';
 import {
   BUILDING_STRUCTURE_LABELS,
   MATERIAL_CATEGORY_LABELS,
+  WASTE_CLASS_LABELS,
   pyeongToM2,
   type BuildingStructure,
   type DetectedMaterial,
   type SiteAnalysis,
+  type SiteQuoteBasis,
   type VolumeEstimate,
 } from '@dimol/shared';
 import { ApiError, analyzeSite, analyzeSiteWasteItems } from '../api/client';
@@ -653,6 +655,24 @@ function buildPrintableHtml(result: SiteAnalysis, estimate: VolumeEstimate | nul
       </div>`
     : '';
 
+  const q = result.quoteBasis;
+  const quoteBlock = q
+    ? `
+<h2>견적 기초자료</h2>
+${q.wasteByClass.length ? `<table><thead><tr><th>법정 분류</th><th>예상 배출량</th><th>배출 방식</th><th>비고</th></tr></thead><tbody>
+${q.wasteByClass
+  .map(
+    (w) => `<tr><td>${e(WASTE_CLASS_LABELS[w.wasteClass])}</td><td class="num">${e(formatWeight(w.estimatedKg))}</td><td>${w.separable ? '분리 가능' : '혼합 배출'}</td><td>${e(w.note ?? '')}</td></tr>`,
+  )
+  .join('')}
+<tr><th>합계</th><th class="num">${e(formatWeight(q.wasteByClass.reduce((a, w) => a + w.estimatedKg, 0)))}</th><th colspan="2"></th></tr>
+</tbody></table>` : ''}
+${q.estimatedWorkDays || q.estimatedCrewSize ? `<p><b>예상 공기</b> ${q.estimatedWorkDays ?? '-'}일 · <b>예상 인원</b> ${q.estimatedCrewSize ?? '-'}명</p>` : ''}
+${q.equipment.length ? `<h2>투입 장비</h2><ul>${q.equipment.map((x) => `<li><b>${e(x.name)}</b>${x.spec ? ` (${e(x.spec)})` : ''}${x.reason ? ` — ${e(x.reason)}` : ''}</li>`).join('')}</ul>` : ''}
+${q.siteChecklist.length ? `<div class="box chk"><h2>현장 실사에서 반드시 확인</h2><p class="sub">사진으로 확인할 수 없는 항목입니다. 견적 오차가 여기서 생깁니다.</p><ul>${q.siteChecklist.map((c) => `<li>${e(c)}</li>`).join('')}</ul></div>` : ''}
+${q.costDrivers.length ? `<h2>단가 좌우 요인</h2><ul>${q.costDrivers.map((c) => `<li>${e(c)}</li>`).join('')}</ul>` : ''}`
+    : '';
+
   return `<!doctype html><html lang="ko"><head><meta charset="utf-8">
 <title>디몰비전 현장 분석 리포트</title>
 <style>
@@ -675,6 +695,9 @@ function buildPrintableHtml(result: SiteAnalysis, estimate: VolumeEstimate | nul
   li{margin-bottom:9px}
   .cau{color:#C62828;font-size:12px}
   .hazards li{color:#C62828}
+  .chk{background:#FFFBEB;border-color:#FDE68A}
+  .chk h2{border-bottom-color:#B45309;color:#B45309}
+  .chk .sub{font-size:12px;color:#92400E;margin:4px 0 8px}
   .note{margin-top:22px;padding-top:12px;border-top:1px solid #DCE3F0;color:#595959;font-size:11px}
   @media print{body{padding:0}@page{margin:14mm}}
 </style></head><body>
@@ -687,6 +710,7 @@ ${estBlock}
 <table><thead><tr><th>소재</th><th>분류</th><th>처리</th><th>추정 중량</th><th>신뢰도</th></tr></thead>
 <tbody>${rows}</tbody></table>
 <h2>권장 철거 공정</h2><ol>${steps}</ol>
+${quoteBlock}
 ${result.hazards.length ? `<h2>안전 위험요소</h2><ul class="hazards">${result.hazards.map((h) => `<li>${e(h)}</li>`).join('')}</ul>` : ''}
 <p class="note">${e(result.disclaimer)}<br>https://dimolvision.vercel.app</p>
 </body></html>`;
@@ -753,6 +777,107 @@ function ShareReportButton({
           <AppIcon name="document" size={16} color={theme.colors.primary} />
           <Text style={styles.shareBtnText}>인쇄 · PDF</Text>
         </PressableScale>
+      ) : null}
+    </View>
+  );
+}
+
+/**
+ * 견적·시공계획 기초자료.
+ * 철거업자가 실제로 필요한 건 "무슨 자재가 있다" 가 아니라 "분류별 몇 톤이고, 무슨 장비로,
+ * 며칠에, 현장에서 뭘 더 확인해야 하는가" 다. 특히 siteChecklist 는 사진으로 알 수 없는
+ * 것을 솔직히 드러내는 자리라, 실사 시간을 줄여 준다.
+ */
+function QuoteBasisSection({ quote }: { quote: SiteQuoteBasis }) {
+  const totalKg = quote.wasteByClass.reduce((s, w) => s + w.estimatedKg, 0);
+  return (
+    <View>
+      <Text style={styles.sectionTitle}>견적 기초자료</Text>
+
+      {quote.wasteByClass.length > 0 ? (
+        <Card>
+          <Text style={styles.qbHead}>법정 분류별 배출량</Text>
+          <Text style={styles.qbSub}>처리비는 분류별 단가 × 톤수로 잡힙니다</Text>
+          {quote.wasteByClass.map((w, i) => (
+            <View key={`${w.wasteClass}-${i}`} style={styles.qbRow}>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.qbRowName}>{WASTE_CLASS_LABELS[w.wasteClass]}</Text>
+                {w.note ? <Text style={styles.qbRowNote}>{w.note}</Text> : null}
+              </View>
+              <View style={styles.qbRowRight}>
+                <Text style={styles.qbRowKg}>{formatWeight(w.estimatedKg)}</Text>
+                <View style={[styles.qbSepChip, !w.separable && styles.qbSepChipMixed]}>
+                  <Text style={[styles.qbSepText, !w.separable && styles.qbSepTextMixed]}>
+                    {w.separable ? '분리 가능' : '혼합 배출'}
+                  </Text>
+                </View>
+              </View>
+            </View>
+          ))}
+          {totalKg > 0 ? (
+            <Text style={styles.qbTotal}>합계 {formatWeight(totalKg)}</Text>
+          ) : null}
+        </Card>
+      ) : null}
+
+      {quote.estimatedWorkDays || quote.estimatedCrewSize ? (
+        <View style={styles.statRow}>
+          {quote.estimatedWorkDays ? (
+            <View style={styles.statTile}>
+              <Text style={styles.statLabel}>예상 공기</Text>
+              <Text style={styles.statValue}>{quote.estimatedWorkDays}일</Text>
+            </View>
+          ) : null}
+          {quote.estimatedCrewSize ? (
+            <View style={styles.statTile}>
+              <Text style={styles.statLabel}>예상 인원</Text>
+              <Text style={styles.statValue}>{quote.estimatedCrewSize}명</Text>
+            </View>
+          ) : null}
+        </View>
+      ) : null}
+
+      {quote.equipment.length > 0 ? (
+        <Card style={{ marginTop: theme.spacing.xs }}>
+          <Text style={styles.qbHead}>투입 장비</Text>
+          {quote.equipment.map((e, i) => (
+            <View key={`${e.name}-${i}`} style={styles.qbEquip}>
+              <Text style={styles.qbEquipName}>
+                {e.name}
+                {e.spec ? <Text style={styles.qbEquipSpec}>  {e.spec}</Text> : null}
+              </Text>
+              {e.reason ? <Text style={styles.qbRowNote}>{e.reason}</Text> : null}
+            </View>
+          ))}
+        </Card>
+      ) : null}
+
+      {quote.siteChecklist.length > 0 ? (
+        <View style={styles.checklistCard}>
+          <View style={styles.qbHeadRow}>
+            <AppIcon name="alert" size={16} color="#B45309" />
+            <Text style={styles.checklistTitle}>현장 실사에서 반드시 확인</Text>
+          </View>
+          <Text style={styles.checklistSub}>
+            사진으로는 확인할 수 없는 항목입니다. 견적 오차가 여기서 생깁니다.
+          </Text>
+          {quote.siteChecklist.map((c, i) => (
+            <Text key={i} style={styles.checklistItem}>
+              □ {c}
+            </Text>
+          ))}
+        </View>
+      ) : null}
+
+      {quote.costDrivers.length > 0 ? (
+        <Card style={{ marginTop: theme.spacing.xs }}>
+          <Text style={styles.qbHead}>단가 좌우 요인</Text>
+          {quote.costDrivers.map((c, i) => (
+            <Text key={i} style={styles.qbRowNote}>
+              · {c}
+            </Text>
+          ))}
+        </Card>
       ) : null}
     </View>
   );
@@ -885,6 +1010,12 @@ function AnalysisResult({ result, estimate }: { result: SiteAnalysis; estimate: 
           </Card>
         </FadeInUp>
       ))}
+
+      {result.quoteBasis ? (
+        <FadeInUp delay={160}>
+          <QuoteBasisSection quote={result.quoteBasis} />
+        </FadeInUp>
+      ) : null}
 
       {result.hazards.length > 0 ? (
         <FadeInUp>
@@ -1327,6 +1458,58 @@ const styles = StyleSheet.create({
   weightValueHazard: {
     color: colors.error,
   },
+
+  /* 견적 기초자료 */
+  qbHead: { color: colors.text, fontSize: font.body, fontWeight: '800' },
+  qbHeadRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  qbSub: { color: colors.textMuted, fontSize: 12, marginTop: 2, marginBottom: spacing.xs },
+  qbRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: spacing.sm,
+    paddingVertical: spacing.xs,
+    borderTopWidth: 1,
+    borderTopColor: colors.border,
+  },
+  qbRowName: { color: colors.text, fontSize: font.body, fontWeight: '700' },
+  qbRowNote: { color: colors.textMuted, fontSize: 12, lineHeight: 18, marginTop: 2 },
+  qbRowRight: { alignItems: 'flex-end', gap: 4 },
+  qbRowKg: { color: colors.text, fontSize: font.body, fontWeight: '800' },
+  qbSepChip: {
+    backgroundColor: colors.primarySoft,
+    borderRadius: 999,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+  },
+  qbSepChipMixed: { backgroundColor: '#FEF3C7' },
+  qbSepText: { color: colors.primary, fontSize: 11, fontWeight: '700' },
+  qbSepTextMixed: { color: '#B45309' },
+  qbTotal: {
+    color: colors.text,
+    fontSize: font.body,
+    fontWeight: '800',
+    textAlign: 'right',
+    marginTop: spacing.xs,
+    paddingTop: spacing.xs,
+    borderTopWidth: 1.5,
+    borderTopColor: colors.border,
+  },
+  qbEquip: { paddingVertical: spacing.xs / 2 },
+  qbEquipName: { color: colors.text, fontSize: font.body, fontWeight: '700' },
+  qbEquipSpec: { color: colors.textMuted, fontSize: 12, fontWeight: '500' },
+
+  /* 현장 확인 체크리스트 — 사진으로 알 수 없는 것을 드러내는 자리 */
+  checklistCard: {
+    backgroundColor: '#FFFBEB',
+    borderColor: '#FDE68A',
+    borderWidth: 1.5,
+    borderRadius: radius.card,
+    padding: spacing.md,
+    marginTop: spacing.xs,
+  },
+  checklistTitle: { color: '#B45309', fontSize: font.body, fontWeight: '800' },
+  checklistSub: { color: '#92400E', fontSize: 12, lineHeight: 18, marginTop: 4, marginBottom: spacing.xs },
+  checklistItem: { color: '#78350F', fontSize: 13, lineHeight: 21, marginTop: 2 },
 
   /* 결과 요약 수치 타일 */
   statRow: {

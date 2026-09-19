@@ -64,6 +64,75 @@ export interface DemolitionStep {
   caution?: string;
 }
 
+
+/**
+ * 건설폐기물 법정 분류 — 처리 단가가 분류마다 다르고, 특히 혼합은 크게 비싸다.
+ * 견적의 처리비는 "분류별 톤수 × 분류별 단가" 로 잡히므로 소재명만으로는 계산이 안 된다.
+ */
+export type ConstructionWasteClass =
+  | 'CONCRETE'
+  | 'ASPHALT'
+  | 'BRICK_BLOCK'
+  | 'WOOD'
+  | 'PLASTIC'
+  | 'METAL'
+  | 'GLASS'
+  | 'BOARD'
+  | 'MIXED'
+  | 'DESIGNATED';
+
+export const WASTE_CLASS_LABELS: Record<ConstructionWasteClass, string> = {
+  CONCRETE: '폐콘크리트',
+  ASPHALT: '폐아스팔트콘크리트',
+  BRICK_BLOCK: '폐벽돌·폐블록',
+  WOOD: '폐목재',
+  PLASTIC: '폐합성수지',
+  METAL: '폐금속류',
+  GLASS: '폐유리',
+  BOARD: '폐보드류(석고보드 등)',
+  MIXED: '혼합건설폐기물',
+  DESIGNATED: '지정폐기물(석면 등)',
+};
+
+/** 분류별 예상 배출량. separable=false 면 혼합으로 빠져 단가가 올라간다. */
+export interface WasteClassSummary {
+  wasteClass: ConstructionWasteClass;
+  estimatedKg: number;
+  /** 현장에서 분리 배출이 가능한지(가능하면 단가가 내려간다). */
+  separable: boolean;
+  note?: string;
+}
+
+/** 투입 장비 제안. */
+export interface EquipmentPlan {
+  /** 장비명 (예: 굴착기). */
+  name: string;
+  /** 규격·사양 (예: 06W 압쇄기 장착). */
+  spec?: string;
+  /** 왜 필요한지. */
+  reason: string;
+}
+
+/**
+ * 견적·시공계획 기초자료.
+ * 사진만으로 확정할 수 없는 것이 많아, 현장에서 확인해야 할 항목(siteChecklist)을
+ * 함께 낸다. "모르는 것을 모른다고 말하는" 것이 견적 실무에서는 더 유용하다.
+ */
+export interface SiteQuoteBasis {
+  /** 법정 분류별 배출량 — 처리비 산정의 입력값. */
+  wasteByClass: WasteClassSummary[];
+  /** 투입 장비 제안. */
+  equipment: EquipmentPlan[];
+  /** 예상 공기(일). */
+  estimatedWorkDays?: number;
+  /** 예상 투입 인원(명/일). */
+  estimatedCrewSize?: number;
+  /** 사진으로 확인할 수 없어 현장 실사에서 반드시 볼 항목. */
+  siteChecklist: string[];
+  /** 단가를 좌우하는 요인(접근성·양중·석면 등). */
+  costDrivers: string[];
+}
+
 export interface SiteAnalysis {
   /** 한 줄 요약(현장 개요). */
   summary: string;
@@ -73,6 +142,8 @@ export interface SiteAnalysis {
   /** 위험 요소 경고(석면·붕괴·전기 등). 비어 있을 수 있음. */
   hazards: string[];
   /** 분석 방법: MOCK(목) | AI_VISION(실제 비전 분석). */
+  /** 견적·시공계획 기초자료. AI 가 채우며, 구형 응답에는 없을 수 있다. */
+  quoteBasis?: SiteQuoteBasis;
   method: 'MOCK' | 'AI_VISION';
   confidence: AnalysisConfidence;
   /** UI 필수 노출 문구 — 참고용/안전 한계 고지. */

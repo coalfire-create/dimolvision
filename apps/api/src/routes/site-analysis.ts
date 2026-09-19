@@ -1,5 +1,12 @@
 import { Router } from 'express';
-import { siteAnalysisToWasteItems, type SiteAnalysis, type VolumeEstimate } from '@dimol/shared';
+import {
+  estimateDemolitionCost,
+  reconcileWasteByClass,
+  siteAnalysisToWasteItems,
+  type CostEstimate,
+  type SiteAnalysis,
+  type VolumeEstimate,
+} from '@dimol/shared';
 import {
   SiteAnalysisValidationError,
   VisionProviderError,
@@ -200,6 +207,44 @@ export function createSiteAnalysisRouter(
     throw lastError;
   }
 
+  /**
+   * 분석 결과 → 금액 견적.
+   *
+   * 분류별 물량은 **총량을 원단위에서, 구성비를 사진에서** 가져와 맞춘다. 비전 모델의
+   * kg 추정은 눈대중이라 총합이 흔들리지만 "무엇이 얼마 비율로 나오는가" 는 잘 잡는다.
+   * 총량을 모르면(연면적 미입력) 사진 값을 그대로 쓰되, 그때는 금액 폭이 넓어진다.
+   *
+   * 분류별 물량 자체가 없으면 견적을 만들지 않는다 — 금액을 지어낼 근거가 없다.
+   */
+  function buildCost(
+    analysis: SiteAnalysis,
+    totalKg: number | undefined,
+    body: Record<string, unknown>,
+  ): CostEstimate | undefined {
+    const basis = analysis.quoteBasis;
+    const byClass = basis?.wasteByClass?.filter((w) => w.estimatedKg > 0) ?? [];
+    if (byClass.length === 0) return undefined;
+
+    const hasAsbestos =
+      analysis.materials.some((m) => m.hazardous) ||
+      analysis.hazards.some((h) => h.includes('석면'));
+    const distanceKm =
+      typeof body.distanceKm === 'number' && body.distanceKm > 0 ? body.distanceKm : undefined;
+
+    return estimateDemolitionCost({
+      wasteByClass: reconcileWasteByClass(byClass, totalKg).map((w) => ({
+        wasteClass: w.wasteClass,
+        estimatedKg: w.estimatedKg,
+        separable: w.separable,
+      })),
+      ...(basis?.estimatedWorkDays ? { workDays: basis.estimatedWorkDays } : {}),
+      ...(basis?.estimatedCrewSize ? { crewSize: basis.estimatedCrewSize } : {}),
+      ...(basis?.equipment ? { equipment: basis.equipment } : {}),
+      hasAsbestos,
+      ...(distanceKm ? { distanceKm } : {}),
+    });
+  }
+
   // POST /api/site-analysis/analyze  { imageBase64, mimeType?, note? }
   router.post('/site-analysis/analyze', async (req, res) => {
     const body = (req.body ?? {}) as Record<string, unknown>;
@@ -261,10 +306,12 @@ export function createSiteAnalysisRouter(
           // 면적 입력이 잘못돼도 사진 분석 자체는 성공이므로 소재별 기본값으로 진행한다.
         }
       }
+      const cost = buildCost(analysis, totalKg, body);
       res.json({
         analysis,
         wasteItems: siteAnalysisToWasteItems(analysis.materials, totalKg),
         ...(estimate ? { estimate } : {}),
+        ...(cost ? { cost } : {}),
         ...(register ? { buildingRegister: register } : {}),
       });
     } catch (err) {

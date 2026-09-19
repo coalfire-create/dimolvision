@@ -21,6 +21,7 @@ export * from './location-share.js';
 export * from './chat.js';
 export * from './estimation.js';
 export * from './site-analysis.js';
+export * from './demolition-cost.js';
 export * from './vision-taxonomy.js';
 export * from './vision-report.js';
 export * from './vision-eval.js';

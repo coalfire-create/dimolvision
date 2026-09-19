@@ -18,6 +18,9 @@ import {
   WASTE_CLASS_LABELS,
   pyeongToM2,
   type BuildingStructure,
+  formatWonShort,
+  type CostEstimate,
+  type CostLine,
   type DetectedMaterial,
   type SiteAnalysis,
   type SiteQuoteBasis,
@@ -84,7 +87,11 @@ function AnalysisProgress() {
  * 현장에서는 이 내용을 철거 업체나 담당자에게 메시지로 보내는 일이 실제 업무라,
  * 화면에서 눈으로 읽는 것만으로는 끝나지 않는다.
  */
-function buildReportText(result: SiteAnalysis, estimate: VolumeEstimate | null): string {
+function buildReportText(
+  result: SiteAnalysis,
+  estimate: VolumeEstimate | null,
+  cost: CostEstimate | null,
+): string {
   const lines: string[] = ['[디몰비전 현장 분석 리포트]', '', result.summary, ''];
 
   if (estimate) {
@@ -95,6 +102,20 @@ function buildReportText(result: SiteAnalysis, estimate: VolumeEstimate | null):
       `- 운반 차량: ${estimate.truckLoads.map((t) => `${t.capacityTons}톤 ${t.count}대`).join(' / ')}`,
       '',
     );
+  }
+
+  if (cost) {
+    lines.push(
+      '■ 예상 공사비 (부가세 포함)',
+      `- 합계: ${formatWonShort(cost.totalMinWon)} ~ ${formatWonShort(cost.totalMaxWon)}`,
+    );
+    for (const l of cost.lines) {
+      lines.push(`- ${l.label}: ${formatWonShort(l.minWon)} ~ ${formatWonShort(l.maxWon)}`);
+      for (const d of l.detail) lines.push(`   · ${d}`);
+    }
+    lines.push('- 제외 항목:');
+    for (const e of cost.excluded) lines.push(`   · ${e}`);
+    lines.push('');
   }
 
   lines.push('■ 구성 소재');
@@ -204,6 +225,8 @@ export function SiteAnalysisScreen() {
   /** 건축년도(사용승인). 2009년 석면 사용 금지 이전이면 AI 가 석면 의심을 가중한다. */
   const [buildYear, setBuildYear] = useState('');
   const [estimate, setEstimate] = useState<VolumeEstimate | null>(null);
+  /** 공표 단가로 계산한 금액 견적. 분류별 물량이 나왔을 때만 채워진다. */
+  const [cost, setCost] = useState<CostEstimate | null>(null);
   /**
    * 지도에서 찍은 현장 주소. 지번 코드가 함께 가면 서버가 건축물대장을 조회해
    * 주구조·연면적·사용승인연도를 채운다 — 사용자가 몰라도 되는 값들이다.
@@ -293,6 +316,8 @@ export function SiteAnalysisScreen() {
       : {};
     if (area === undefined) {
       setEstimate(null);
+      // 연면적이 없으면 물량 총량을 모른다 → 금액을 낼 근거가 없으므로 지운다.
+      setCost(null);
       const r = await analyzeSite({
         images: payload,
         ...addr,
@@ -311,6 +336,7 @@ export function SiteAnalysisScreen() {
     });
     setRegister(r.buildingRegister ?? null);
     setEstimate(r.estimate ?? null);
+    setCost(r.cost ?? null);
     setResult(r.analysis);
   }
 
@@ -644,7 +670,7 @@ export function SiteAnalysisScreen() {
 
         {loading ? <AnalysisProgress /> : null}
 
-        {result ? <AnalysisResult result={result} estimate={estimate} /> : null}
+        {result ? <AnalysisResult result={result} estimate={estimate} cost={cost} /> : null}
 
         {/* 로그인이 없어도 수집·이용 고지는 제공한다(사진은 분석 즉시 폐기, 저장하지 않음). */}
         <View style={styles.legalFooter}>
@@ -748,7 +774,11 @@ function escapeHtml(s: string): string {
  * 철거 현장에서는 이 리포트를 출력해 보관하거나 PDF 로 저장해 발주처에 내므로,
  * 인쇄 전용 레이아웃을 따로 만든다.
  */
-function buildPrintableHtml(result: SiteAnalysis, estimate: VolumeEstimate | null): string {
+function buildPrintableHtml(
+  result: SiteAnalysis,
+  estimate: VolumeEstimate | null,
+  cost: CostEstimate | null,
+): string {
   const e = escapeHtml;
   const rows = result.materials
     .map((m) => {
@@ -801,6 +831,29 @@ ${q.siteChecklist.length ? `<div class="box chk"><h2>현장 실사에서 반드�
 ${q.costDrivers.length ? `<h2>단가 좌우 요인</h2><ul>${q.costDrivers.map((c) => `<li>${e(c)}</li>`).join('')}</ul>` : ''}`
     : '';
 
+  // 견적서 형태의 금액표. 인쇄해서 그대로 업체에 돌릴 수 있어야 하므로
+  // 항목·금액·산출근거·제외항목·출처를 한 장에 모두 담는다.
+  const costBlock = cost
+    ? `
+<h2>예상 공사비</h2>
+<table><thead><tr><th>항목</th><th>하한</th><th>상한</th><th>산출 근거</th></tr></thead><tbody>
+${cost.lines
+  .map(
+    (l) => `<tr><td>${e(l.label)}</td><td class="num">${e(formatWonShort(l.minWon))}</td>` +
+      `<td class="num">${e(formatWonShort(l.maxWon))}</td>` +
+      `<td class="src">${l.detail.map((d) => e(d)).join('<br>')}` +
+      `${l.source ? `<br><i>${e(l.source.agency)} · ${e(l.source.title)} (${e(l.source.effective)})</i>` : ''}</td></tr>`,
+  )
+  .join('')}
+<tr><th>공급가액</th><th class="num">${e(formatWonShort(cost.subtotalMinWon))}</th><th class="num">${e(formatWonShort(cost.subtotalMaxWon))}</th><th></th></tr>
+<tr><th>부가가치세</th><th class="num">${e(formatWonShort(cost.vatMinWon))}</th><th class="num">${e(formatWonShort(cost.vatMaxWon))}</th><th></th></tr>
+<tr class="tot"><th>합계</th><th class="num">${e(formatWonShort(cost.totalMinWon))}</th><th class="num">${e(formatWonShort(cost.totalMaxWon))}</th><th></th></tr>
+</tbody></table>
+<p class="sub">금액 폭은 분리배출 성공 여부에서 옵니다. 현장에서 분리하면 하한에, 혼합으로 나가면 상한에 가까워집니다.</p>
+<div class="box chk"><h2>견적에 포함되지 않은 항목</h2><ul>${cost.excluded.map((x) => `<li>${e(x)}</li>`).join('')}</ul></div>
+<p class="sub"><b>계산 가정</b> ${cost.assumptions.map((a) => e(a)).join(' · ')}</p>`
+    : '';
+
   return `<!doctype html><html lang="ko"><head><meta charset="utf-8">
 <title>디몰비전 현장 분석 리포트</title>
 <style>
@@ -826,6 +879,9 @@ ${q.costDrivers.length ? `<h2>단가 좌우 요인</h2><ul>${q.costDrivers.map((
   .chk{background:#FFFBEB;border-color:#FDE68A}
   .chk h2{border-bottom-color:#B45309;color:#B45309}
   .chk .sub{font-size:12px;color:#92400E;margin:4px 0 8px}
+  .src{font-size:11px;color:#595959;line-height:1.5}
+  tr.tot th{background:#EAEFFD;color:#1E3A8A;font-size:14px}
+  .sub{font-size:12px;color:#595959}
   .note{margin-top:22px;padding-top:12px;border-top:1px solid #DCE3F0;color:#595959;font-size:11px}
   @media print{body{padding:0}@page{margin:14mm}}
 </style></head><body>
@@ -839,6 +895,7 @@ ${estBlock}
 <tbody>${rows}</tbody></table>
 <h2>권장 철거 공정</h2><ol>${steps}</ol>
 ${quoteBlock}
+${costBlock}
 ${result.hazards.length ? `<h2>안전 위험요소</h2><ul class="hazards">${result.hazards.map((h) => `<li>${e(h)}</li>`).join('')}</ul>` : ''}
 <p class="note">${e(result.disclaimer)}<br>https://dimolvision.vercel.app</p>
 </body></html>`;
@@ -851,14 +908,16 @@ ${result.hazards.length ? `<h2>안전 위험요소</h2><ul class="hazards">${res
 function ShareReportButton({
   result,
   estimate,
+  cost,
 }: {
   result: SiteAnalysis;
   estimate: VolumeEstimate | null;
+  cost: CostEstimate | null;
 }) {
   const [copied, setCopied] = useState(false);
 
   async function handleShare() {
-    const text = buildReportText(result, estimate);
+    const text = buildReportText(result, estimate, cost);
     try {
       if (Platform.OS === 'web') {
         await navigator.clipboard.writeText(text);
@@ -875,7 +934,7 @@ function ShareReportButton({
   function handlePrint() {
     const w = window.open('', '_blank');
     if (!w) return; // 팝업 차단 — 복사 버튼이 대안으로 남아 있다.
-    w.document.write(buildPrintableHtml(result, estimate));
+    w.document.write(buildPrintableHtml(result, estimate, cost));
     w.document.close();
     w.focus();
     setTimeout(() => w.print(), 300);
@@ -1046,6 +1105,94 @@ function VolumeEstimateCard({ estimate }: { estimate: VolumeEstimate }) {
 }
 
 /** 결과 상단 요약 지표 — 차트가 아니라 수치 타일이 맞는 자리(값 3개, 비교 아님). */
+/**
+ * 금액 견적 카드.
+ *
+ * 총액을 크게 띄우고, 누르면 항목별 산출 근거를 편다. 견적을 받는 쪽이 가장 먼저 보는 건
+ * 총액이지만, 실제로 판단하는 건 "이 금액이 어떻게 나왔나" 라서 근거를 감추지 않는다.
+ * 제외 항목도 같은 무게로 보여 준다 — 빠진 비용을 모르고 계약하는 게 가장 큰 사고다.
+ */
+function CostEstimateCard({ cost }: { cost: CostEstimate }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <View style={styles.costCard}>
+      <View style={styles.costHead}>
+        <AppIcon name="document" size={18} color="#F8FAFC" />
+        <Text style={styles.costTitle}>예상 공사비</Text>
+        <View style={styles.costVatChip}>
+          <Text style={styles.costVatText}>부가세 포함</Text>
+        </View>
+      </View>
+
+      <Text style={styles.costHero}>
+        {formatWonShort(cost.totalMinWon)}
+        <Text style={styles.costHeroTilde}> ~ </Text>
+        {formatWonShort(cost.totalMaxWon)}
+      </Text>
+      <Text style={styles.costSub}>
+        {`공급가액 ${formatWonShort(cost.subtotalMinWon)}~${formatWonShort(cost.subtotalMaxWon)} · ` +
+          `부가세 ${formatWonShort(cost.vatMinWon)}~${formatWonShort(cost.vatMaxWon)}`}
+      </Text>
+      <Text style={styles.costWhyRange}>
+        폭이 넓은 이유는 분리배출 성공 여부입니다. 현장에서 분리하면 하한에, 혼합으로 나가면
+        상한에 가까워집니다.
+      </Text>
+
+      {cost.lines.map((l) => (
+        <CostLineRow key={l.key} line={l} open={open} />
+      ))}
+
+      <PressableScale
+        style={styles.costToggle}
+        onPress={() => setOpen((v) => !v)}
+        accessibilityRole="button"
+      >
+        <Text style={styles.costToggleText}>{open ? '산출 근거 접기' : '산출 근거 펼치기'}</Text>
+      </PressableScale>
+
+      <View style={styles.costNoteBox}>
+        <Text style={styles.costNoteTitle}>견적에 포함되지 않은 항목</Text>
+        {cost.excluded.map((e) => (
+          <Text key={e} style={styles.costNoteItem}>
+            • {e}
+          </Text>
+        ))}
+      </View>
+
+      <Text style={styles.costSourceText}>
+        단가 출처: 한국건설자원협회 중간처리단가(2025), 한국건설자원수집운반협회 수집·운반비(2026),
+        대한건설협회 시중노임단가·건설기계 경비산출표(2026 상반기), 환경부 고시 폐석면 처리단가
+      </Text>
+    </View>
+  );
+}
+
+/** 견적 한 줄. 펼치면 산출 근거가 그대로 보인다. */
+function CostLineRow({ line, open }: { line: CostLine; open: boolean }) {
+  return (
+    <View style={styles.costLine}>
+      <View style={styles.costLineTop}>
+        <Text style={styles.costLineLabel}>{line.label}</Text>
+        <Text style={styles.costLineValue}>
+          {formatWonShort(line.minWon)}~{formatWonShort(line.maxWon)}
+        </Text>
+      </View>
+      {open
+        ? line.detail.map((d, i) => (
+            <Text key={i} style={styles.costLineDetail}>
+              · {d}
+            </Text>
+          ))
+        : null}
+      {open && line.source ? (
+        <Text style={styles.costLineSource}>
+          {line.source.agency} · {line.source.title} ({line.source.effective})
+        </Text>
+      ) : null}
+    </View>
+  );
+}
+
 function ResultStats({ materials }: { materials: DetectedMaterial[] }) {
   const totalKg = materials.reduce((sum, m) => sum + (m.estimatedKg ?? 0), 0);
   const recyclableKg = materials
@@ -1073,7 +1220,15 @@ function ResultStats({ materials }: { materials: DetectedMaterial[] }) {
   );
 }
 
-function AnalysisResult({ result, estimate }: { result: SiteAnalysis; estimate: VolumeEstimate | null }) {
+function AnalysisResult({
+  result,
+  estimate,
+  cost,
+}: {
+  result: SiteAnalysis;
+  estimate: VolumeEstimate | null;
+  cost: CostEstimate | null;
+}) {
   const maxKg = Math.max(0, ...result.materials.map((m) => m.estimatedKg ?? 0));
   return (
     <View style={{ marginTop: theme.spacing.md }}>
@@ -1098,6 +1253,12 @@ function AnalysisResult({ result, estimate }: { result: SiteAnalysis; estimate: 
       {estimate ? (
         <FadeInUp delay={90}>
           <VolumeEstimateCard estimate={estimate} />
+        </FadeInUp>
+      ) : null}
+
+      {cost ? (
+        <FadeInUp delay={110}>
+          <CostEstimateCard cost={cost} />
         </FadeInUp>
       ) : null}
 
@@ -1158,7 +1319,7 @@ function AnalysisResult({ result, estimate }: { result: SiteAnalysis; estimate: 
         </FadeInUp>
       ) : null}
 
-      <ShareReportButton result={result} estimate={estimate} />
+      <ShareReportButton result={result} estimate={estimate} cost={cost} />
 
       <Text style={styles.disclaimer}>{result.disclaimer}</Text>
     </View>
@@ -1516,6 +1677,62 @@ const styles = StyleSheet.create({
   structChipTextOn: { color: colors.primary },
 
   /* 물량 추정 결과 카드 */
+  /* 금액 견적 */
+  costCard: {
+    backgroundColor: '#111827',
+    borderRadius: radius.card,
+    padding: spacing.md,
+    marginTop: spacing.xs,
+    marginBottom: spacing.xs,
+  },
+  costHead: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  costTitle: { color: '#F8FAFC', fontSize: font.body, fontWeight: '800', flex: 1 },
+  costVatChip: {
+    backgroundColor: 'rgba(255,255,255,0.12)',
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 3,
+  },
+  costVatText: { color: '#A7F3D0', fontSize: 11, fontWeight: '700' },
+  costHero: {
+    color: '#FFFFFF',
+    fontSize: 30,
+    fontWeight: '800',
+    marginTop: spacing.sm,
+    letterSpacing: -0.5,
+  },
+  costHeroTilde: { color: '#64748B', fontSize: 22, fontWeight: '600' },
+  costSub: { color: '#94A3B8', fontSize: 12, marginTop: 4 },
+  costWhyRange: { color: '#CBD5E1', fontSize: 12, lineHeight: 18, marginTop: spacing.sm },
+  costLine: {
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255,255,255,0.08)',
+    paddingTop: spacing.sm,
+    marginTop: spacing.sm,
+  },
+  costLineTop: { flexDirection: 'row', alignItems: 'baseline', gap: spacing.xs },
+  costLineLabel: { color: '#E2E8F0', fontSize: 13, fontWeight: '700', flex: 1 },
+  costLineValue: { color: '#FFFFFF', fontSize: 13, fontWeight: '800' },
+  costLineDetail: { color: '#94A3B8', fontSize: 11, lineHeight: 17, marginTop: 3 },
+  costLineSource: { color: '#64748B', fontSize: 10, lineHeight: 15, marginTop: 4 },
+  costToggle: {
+    marginTop: spacing.sm,
+    alignItems: 'center',
+    paddingVertical: 9,
+    borderRadius: radius.button,
+    backgroundColor: 'rgba(255,255,255,0.08)',
+  },
+  costToggleText: { color: '#BFDBFE', fontSize: 13, fontWeight: '700' },
+  costNoteBox: {
+    marginTop: spacing.sm,
+    backgroundColor: 'rgba(251,191,36,0.10)',
+    borderRadius: 12,
+    padding: spacing.sm,
+  },
+  costNoteTitle: { color: '#FCD34D', fontSize: 12, fontWeight: '800', marginBottom: 4 },
+  costNoteItem: { color: '#E2E8F0', fontSize: 11, lineHeight: 17 },
+  costSourceText: { color: '#64748B', fontSize: 10, lineHeight: 15, marginTop: spacing.sm },
+
   estimateCard: {
     backgroundColor: '#0F172A',
     borderRadius: radius.card,

@@ -59,6 +59,15 @@
       .gl li { margin-bottom: 2px; }
       .gwarn { margin: 10px 0 0; padding: 9px 11px; background: var(--warnbg); border: 1px solid var(--warnbd);
                border-radius: 8px; font-size: 12px; color: #78350f; }
+      .presets { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 8px; margin: 12px 0; }
+      .preset { display: block; width: 100%; text-align: left; background: #fff; border: 1.5px solid var(--border);
+                border-radius: 10px; padding: 10px 12px; cursor: pointer; font: inherit; color: inherit; margin: 0; }
+      .preset.on { border-color: var(--primary); background: var(--soft); }
+      .preset b { display: block; font-size: 14px; }
+      .preset span { font-size: 12px; color: var(--muted); }
+      #toAnalysis { display: block; margin-top: 12px; text-align: center; padding: 13px;
+                    background: var(--primary); color: #fff; border-radius: 12px;
+                    font-weight: 800; text-decoration: none; }
       .note { background: var(--warnbg); border: 1px solid var(--warnbd); border-radius: 10px; padding: 12px 14px; font-size: 13px; color: #78350f; margin-top: 12px; }
       .err { background: #fef2f2; border: 1px solid #fecaca; color: #7f1d1d; border-radius: 10px; padding: 12px 14px; font-size: 13px; margin-top: 12px; }
       .hidden { display: none !important; }
@@ -104,27 +113,12 @@
       </div>
 
       <div class="card">
-        <h2>2. 크기 기준 <span style="font-weight:400;color:var(--muted);font-size:13px">(선택)</span></h2>
+        <h2>2. 복원 실행</h2>
         <p class="sub">
-          사진만으로 만든 3D 는 <b>형상은 알아도 크기는 모릅니다</b>. 실제로 잰 길이를 하나
-          알려주면 전체를 미터로 환산합니다. 비워두면 형상만 봅니다.
+          프레임을 뽑아 카메라 위치와 3D 점군을 계산합니다. 수 분 걸립니다.
+          크기 기준은 <b>복원 결과를 본 다음</b> 정합니다 — 어느 방향이 높이인지는
+          결과를 봐야 알 수 있기 때문입니다.
         </p>
-        <div class="row">
-          <div class="field">
-            <label for="axis">기준 축</label>
-            <select id="axis">
-              <option value="">사용 안 함</option>
-              <option value="x">가장 긴 방향(가로)</option>
-              <option value="y">두 번째 방향(세로)</option>
-              <option value="z">가장 짧은 방향(높이)</option>
-              <option value="diagonal">대각선</option>
-            </select>
-          </div>
-          <div class="field">
-            <label for="meters">실제 길이 (m)</label>
-            <input id="meters" type="number" min="0.1" step="0.1" placeholder="예: 12" />
-          </div>
-        </div>
         <button id="go" disabled>3D 복원 시작</button>
         <div class="bar"><i id="bar"></i></div>
         <div id="stage"></div>
@@ -136,7 +130,31 @@
         <p class="sub" id="quality"></p>
         <div id="viewer"></div>
         <div class="stats" id="stats"></div>
+      </div>
+
+      <div id="scaleCard" class="card hidden">
+        <h2>3. 크기 기준 정하기</h2>
+        <p class="sub">
+          사진만으로 만든 3D 는 <b>형상은 알아도 크기는 모릅니다</b>. 같은 모양이 1m 일 수도
+          10m 일 수도 있기 때문입니다. 아는 길이를 하나 고르면 전체가 미터로 환산됩니다.
+        </p>
+        <div id="presets" class="presets"></div>
+        <div class="row">
+          <div class="field">
+            <label for="axis">기준으로 쓸 방향</label>
+            <select id="axis">
+              <option value="shortest">가장 짧은 방향 (보통 높이)</option>
+              <option value="longest">가장 긴 방향 (보통 가로 폭)</option>
+              <option value="diagonal">대각선</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="meters">그 방향의 실제 길이 (m)</label>
+            <input id="meters" type="number" min="0.1" step="0.1" placeholder="예: 2.4" />
+          </div>
+        </div>
         <div id="scaleNote" class="note hidden"></div>
+        <a id="toAnalysis" class="hidden" href="/">이 면적으로 철거 견적 내기 →</a>
       </div>
 
       <footer>
@@ -348,6 +366,91 @@ const SAMPLE = 72, KEEP = 60, MAX_EDGE = 1600;
         $('error').classList.remove('hidden');
       }
 
+      // ── 크기 환산 ────────────────────────────────────────────────────
+      // 복원 좌표계는 단위가 없다. 기준 길이 하나를 곱해 전체를 미터로 옮긴다.
+      // 서버를 다시 부르지 않으므로 기준을 바꾸면 즉시 반영된다 — 여러 기준을
+      // 대보며 "이 정도면 맞겠다" 를 찾는 게 실제 쓰는 방식이다.
+      let lastExtent = null;
+
+      const PRESETS = [
+        { label: '실내 문 높이', m: 2.1, axis: 'shortest', hint: '표준 실내 문' },
+        { label: '주택 층고', m: 2.4, axis: 'shortest', hint: '단독·다세대' },
+        { label: '상가 층고', m: 2.7, axis: 'shortest', hint: '근린생활시설' },
+        { label: '창고 층고', m: 3.0, axis: 'shortest', hint: '공장·창고' },
+      ];
+
+      function renderPresets() {
+        $('presets').innerHTML = PRESETS.map((p, i) =>
+          `<button type="button" class="preset" data-i="${i}">` +
+          `<b>${p.label} ${p.m}m</b><span>${p.hint}</span></button>`).join('');
+        $('presets').querySelectorAll('.preset').forEach(btn => {
+          btn.addEventListener('click', () => {
+            const p = PRESETS[+btn.dataset.i];
+            $('axis').value = p.axis;
+            $('meters').value = p.m;
+            $('presets').querySelectorAll('.preset').forEach(b => b.classList.remove('on'));
+            btn.classList.add('on');
+            renderScaled();
+          });
+        });
+      }
+
+      /** 기준 축의 복원 단위 길이. 축 이름은 사람이 아는 말(가장 짧은/긴 방향)로 받는다. */
+      function unitFor(extent, axis) {
+        const sorted = [extent.x, extent.y, extent.z].sort((a, b) => a - b);
+        if (axis === 'diagonal') return extent.diagonal;
+        if (axis === 'longest') return sorted[2];
+        return sorted[0];
+      }
+
+      function renderScaled() {
+        if (!lastExtent) return;
+        const axis = $('axis').value;
+        const meters = parseFloat($('meters').value);
+        const unit = unitFor(lastExtent, axis);
+        const note = $('scaleNote');
+        note.classList.remove('hidden');
+
+        if (!(unit > 0) || !isFinite(meters) || meters <= 0) {
+          // 기준이 없으면 치수를 내지 않는다. 근거 없이 미터를 붙이면 그건 측정이 아니다.
+          $('stats').innerHTML = [
+            ['정합 이미지', lastStats.reg + '장'],
+            ['복원 점', lastStats.pts.toLocaleString()],
+            ['소요', lastStats.sec + '초'],
+          ].map(([k, v]) => `<div class="stat"><span>${k}</span><b>${v}</b></div>`).join('');
+          note.innerHTML = '위에서 아는 길이를 하나 고르면 전체 치수가 미터로 나옵니다.';
+          $('toAnalysis').classList.add('hidden');
+          return;
+        }
+
+        const k = meters / unit;
+        const dims = [lastExtent.x, lastExtent.y, lastExtent.z].map(v => v * k).sort((a, b) => b - a);
+        const r1 = n => Math.round(n * 10) / 10;
+        const [w, d, h] = dims;
+        const floor = r1(w * d), vol = r1(w * d * h);
+
+        $('stats').innerHTML = [
+          ['가로', r1(w) + 'm'], ['세로', r1(d) + 'm'], ['높이', r1(h) + 'm'],
+          ['바닥면적', floor + '㎡'], ['부피', vol + '㎥'],
+        ].map(([kk, v]) => `<div class="stat"><span>${kk}</span><b>${v}</b></div>`).join('');
+
+        note.innerHTML =
+          `${$('axis').selectedOptions[0].text} = ${meters}m 기준으로 환산했습니다 ` +
+          `(복원 1단위 = ${k.toFixed(3)}m). 기준이 어긋나면 <b>모든 치수가 같은 비율로</b> 어긋납니다. ` +
+          `줄자로 잰 값이 있으면 그걸 넣는 편이 정확합니다.`;
+
+        // 잰 바닥면적을 그대로 분석 화면으로 넘긴다 — 여기서 견적으로 이어진다.
+        const link = $('toAnalysis');
+        link.href = `/?areaM2=${floor}`;
+        link.textContent = `이 바닥면적(${floor}㎡)으로 철거 견적 내기 →`;
+        link.classList.remove('hidden');
+      }
+
+      let lastStats = { reg: 0, pts: 0, sec: 0 };
+      $('axis').addEventListener('change', renderScaled);
+      $('meters').addEventListener('input', renderScaled);
+      renderPresets();
+
       $('go').addEventListener('click', async () => {
         if (!picked) return;
         $('go').disabled = true;
@@ -361,12 +464,10 @@ const SAMPLE = 72, KEEP = 60, MAX_EDGE = 1600;
           if (frames.length < 8) throw new Error('쓸 만한 프레임이 부족합니다. 더 길게, 천천히 촬영해 주세요.');
 
           setStage(`${frames.length}장으로 3D 복원 중… 수 분 걸립니다`, 45);
-          const axis = $('axis').value;
-          const meters = parseFloat($('meters').value);
           // exhaustive 는 모든 쌍을 비교한다. 손으로 든 촬영은 인접 프레임 겹침이
           // 들쭉날쭉해 sequential 로는 놓치는 쌍이 많았다(실측 4/28 → 27/60).
+          // 크기 기준은 여기서 보내지 않는다 — 결과를 본 뒤 고르고, 환산은 화면에서 즉시 한다.
           const body = { frames: frames.map(f => f.base64), matcher: 'exhaustive', maxImageSize: 1600 };
-          if (axis && isFinite(meters) && meters > 0) body.scaleReference = { axis, realMeters: meters };
 
           const res = await fetch('/api/recon/reconstruct', {
             method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body),
@@ -387,25 +488,11 @@ const SAMPLE = 72, KEEP = 60, MAX_EDGE = 1600;
 
           renderCloud(data.points, data.cameras);
 
-          const d = data.dimensions;
-          $('stats').innerHTML = d
-            ? [
-                ['가로', d.widthM + 'm'], ['세로', d.depthM + 'm'], ['높이', d.heightM + 'm'],
-                ['바닥면적', d.floorAreaM2 + '㎡'], ['부피', d.volumeM3 + '㎥'],
-              ].map(([k, v]) => `<div class="stat"><span>${k}</span><b>${v}</b></div>`).join('')
-            : [
-                ['정합 이미지', `${data.registeredImages}장`],
-                ['복원 점', data.pointCount.toLocaleString()],
-                ['소요', data.elapsedSec + '초'],
-              ].map(([k, v]) => `<div class="stat"><span>${k}</span><b>${v}</b></div>`).join('');
-
-          const note = $('scaleNote');
-          note.classList.remove('hidden');
-          note.innerHTML = d
-            ? `입력하신 기준(${$('axis').selectedOptions[0].text} = ${meters}m)으로 환산한 값입니다. ` +
-              `기준이 부정확하면 전체 치수가 같은 비율로 어긋납니다.`
-            : `<b>크기 기준을 입력하지 않아 치수를 낼 수 없습니다.</b> 사진만으로 만든 3D 는 ` +
-              `형상은 알아도 실제 크기는 알 수 없습니다. 현장에서 잰 길이를 하나 넣어 다시 시도해 주세요.`;
+          // 복원 좌표계의 크기. 여기서부터는 서버를 다시 부르지 않고 화면에서 환산한다.
+          lastExtent = data.extent;
+          lastStats = { reg: data.registeredImages, pts: data.pointCount, sec: data.elapsedSec };
+          $('scaleCard').classList.remove('hidden');
+          renderScaled();
         } catch (e) {
           showError(e.message || '복원 중 문제가 발생했습니다.');
         } finally {

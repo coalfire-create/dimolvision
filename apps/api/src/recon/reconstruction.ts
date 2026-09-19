@@ -101,13 +101,32 @@ export class ReconstructionClient {
   }
 }
 
-/** 기준 길이 입력 — 단위 없는 좌표계를 미터로 옮기는 유일한 근거. */
+/**
+ * 기준 길이 입력 — 단위 없는 좌표계를 미터로 옮기는 유일한 근거.
+ *
+ * 축을 x·y·z 로만 받으면 쓸 수 없다. COLMAP 좌표축은 중력 방향과 무관해서 사용자가
+ * "어느 게 높이냐" 를 알 방법이 없기 때문이다. 그래서 사람이 실제로 아는 길이
+ * (층고 2.4m, 실내 문 2.1m, 건물 전면 폭)를 그대로 넣을 수 있게 **가장 짧은 축**과
+ * **가장 긴 축**을 이름으로 받는다. 실내 공간은 높이가 가장 짧고 폭이 가장 길다.
+ */
 export interface ScaleReference {
-  /** 복원 좌표계에서 잰 길이. 보통 가장 긴 축(extent 의 최댓값)을 쓴다. */
-  axis: 'x' | 'y' | 'z' | 'diagonal';
-  /** 그 축의 실제 길이(m). 사용자가 줄자로 잰 값이나 도면 치수. */
+  /** 기준으로 삼을 축. shortest=높이류, longest=폭류, diagonal=대각선. */
+  axis: 'x' | 'y' | 'z' | 'diagonal' | 'shortest' | 'longest';
+  /** 그 축의 실제 길이(m). 줄자로 잰 값, 도면 치수, 또는 층고·문 높이 같은 표준 치수. */
   realMeters: number;
 }
+
+/**
+ * 사람이 아는 표준 치수 — 줄자 없이도 크기 기준을 잡을 수 있게 한다.
+ * 정확한 실측보다는 못하지만, 기준이 아예 없어 "치수를 낼 수 없습니다" 로 끝나는 것보다 낫다.
+ * 각 값이 어디서 온 표준인지 라벨에 적어 사용자가 자기 현장과 대조할 수 있게 한다.
+ */
+export const SCALE_PRESETS = [
+  { id: 'door', label: '실내 문 높이', meters: 2.1, axis: 'shortest' as const },
+  { id: 'floor24', label: '주택 층고', meters: 2.4, axis: 'shortest' as const },
+  { id: 'floor27', label: '상가·사무실 층고', meters: 2.7, axis: 'shortest' as const },
+  { id: 'floor30', label: '공장·창고 층고', meters: 3.0, axis: 'shortest' as const },
+];
 
 export interface ScaledDimensions {
   /** 미터 단위 치수. */
@@ -133,7 +152,15 @@ export function scaleDimensions(
   extent: ReconExtent,
   ref: ScaleReference,
 ): ScaledDimensions | undefined {
-  const unit = ref.axis === 'diagonal' ? extent.diagonal : extent[ref.axis];
+  const sorted = [extent.x, extent.y, extent.z].sort((a, b) => a - b);
+  const unit =
+    ref.axis === 'diagonal'
+      ? extent.diagonal
+      : ref.axis === 'shortest'
+        ? sorted[0]!
+        : ref.axis === 'longest'
+          ? sorted[2]!
+          : extent[ref.axis];
   if (!Number.isFinite(unit) || unit <= 0) return undefined;
   if (!Number.isFinite(ref.realMeters) || ref.realMeters <= 0) return undefined;
 

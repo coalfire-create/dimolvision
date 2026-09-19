@@ -108,3 +108,30 @@ describe('ReconstructionClient', () => {
     expect(r).toMatchObject({ ok: false, stage: 'network' });
   });
 });
+
+describe('scaleDimensions — 사람이 아는 축 이름', () => {
+  // COLMAP 축은 중력 방향을 모른다. 사용자가 x·y·z 중 무엇이 높이인지 알 방법이 없으므로
+  // "가장 짧은 축 = 층고" 처럼 사람이 아는 말로 기준을 받을 수 있어야 한다.
+  const extent = { x: 4, y: 2, z: 8, diagonal: 9.17 };
+
+  it('shortest 는 가장 짧은 축을 기준으로 잡는다', () => {
+    // y(2단위) = 2.4m → 1단위 = 1.2m → 축들은 4.8 / 2.4 / 9.6m
+    const d = scaleDimensions(extent, { axis: 'shortest', realMeters: 2.4 })!;
+    expect(d.metersPerUnit).toBeCloseTo(1.2, 5);
+    expect(d.heightM).toBeCloseTo(2.4, 1);
+    expect(d.widthM).toBeCloseTo(9.6, 1);
+  });
+
+  it('longest 는 가장 긴 축을 기준으로 잡는다', () => {
+    // z(8단위) = 16m → 1단위 = 2m
+    const d = scaleDimensions(extent, { axis: 'longest', realMeters: 16 })!;
+    expect(d.metersPerUnit).toBeCloseTo(2, 5);
+    expect(d.heightM).toBeCloseTo(4, 1);
+  });
+
+  it('같은 현장을 두 기준으로 재도 비율은 그대로다', () => {
+    const a = scaleDimensions(extent, { axis: 'shortest', realMeters: 2.4 })!;
+    const b = scaleDimensions(extent, { axis: 'longest', realMeters: 9.6 })!;
+    expect(a.volumeM3).toBeCloseTo(b.volumeM3, 0);
+  });
+});

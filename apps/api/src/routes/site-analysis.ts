@@ -389,8 +389,11 @@ function parseScaleReference(raw: unknown): ScaleReference | undefined {
   if (typeof raw !== 'object' || raw === null) return undefined;
   const r = raw as Record<string, unknown>;
   const axis = r.axis;
-  if (axis !== 'x' && axis !== 'y' && axis !== 'z' && axis !== 'diagonal') return undefined;
+  const allowed = ['x', 'y', 'z', 'diagonal', 'shortest', 'longest'] as const;
+  if (typeof axis !== 'string' || !allowed.includes(axis as (typeof allowed)[number])) {
+    return undefined;
+  }
   const meters = r.realMeters;
   if (typeof meters !== 'number' || !Number.isFinite(meters) || meters <= 0) return undefined;
-  return { axis, realMeters: meters };
+  return { axis: axis as ScaleReference['axis'], realMeters: meters };
 }

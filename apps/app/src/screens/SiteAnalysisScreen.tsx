@@ -16,6 +16,7 @@ import {
   BUILDING_STRUCTURE_LABELS,
   MATERIAL_CATEGORY_LABELS,
   WASTE_CLASS_LABELS,
+  m2ToPyeong,
   pyeongToM2,
   type BuildingStructure,
   formatWonShort,
@@ -203,6 +204,18 @@ function registerChips(r: BuildingRegisterInfo): string[] {
   return out;
 }
 
+/**
+ * 3D 복원(/recon.html)이 실측한 바닥면적을 쿼리로 넘겨준다.
+ * 면적 입력을 채워 두면 사용자가 다시 재지 않아도 물량·금액까지 바로 이어진다.
+ * 말이 안 되는 값(0 이하, 10만㎡ 초과)은 무시한다.
+ */
+function readAreaFromUrl(): number | undefined {
+  if (Platform.OS !== 'web' || typeof window === 'undefined') return undefined;
+  const raw = new URLSearchParams(window.location.search).get('areaM2');
+  const v = Number(raw);
+  return Number.isFinite(v) && v > 0 && v <= 100_000 ? v : undefined;
+}
+
 function mimeFromUri(uri: string): string {
   return uri.toLowerCase().endsWith('.png') ? 'image/png' : 'image/jpeg';
 }
@@ -235,10 +248,12 @@ export function SiteAnalysisScreen() {
   /** 대장 조회 결과. 무엇이 자동으로 반영됐는지 화면에 근거로 보여 준다. */
   const [register, setRegister] = useState<BuildingRegisterInfo | null>(null);
 
-  // 지도 페이지가 선택한 지번을 쿼리로 넘겨준다.
+  // 지도 페이지가 선택한 지번을, 3D 복원 페이지가 실측 바닥면적을 쿼리로 넘겨준다.
   useEffect(() => {
     const found = readParcelFromUrl();
     if (found) setParcel(found);
+    const area = readAreaFromUrl();
+    if (area !== undefined) setPyeong(String(m2ToPyeong(area)));
   }, []);
 
 

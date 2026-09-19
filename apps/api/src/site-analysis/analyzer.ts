@@ -502,6 +502,11 @@ export class GroqSiteAnalyzer implements SiteAnalyzer {
  *
  * minItems 는 "최소한 이만큼은 보라"는 지시로 작동한다. 과하게 잡으면 모델이 억지로
  * 지어내므로, 철거 현장이라면 현실적으로 그 정도는 관찰되는 수준으로만 뒀다.
+ *
+ * maxItems 는 쓰지 않는다. Gemini 는 스키마를 제약 상태기계로 컴파일하는데,
+ * 중첩 배열마다 상한이 붙으면 상태 수가 폭발해 400 을 낸다
+ * ("The specified schema produces a constraint that has too many states for serving").
+ * 실측: maxItems 를 빼면 같은 스키마가 200 으로 통과한다.
  */
 const ANALYSIS_JSON_SCHEMA = {
   type: 'object',
@@ -510,7 +515,6 @@ const ANALYSIS_JSON_SCHEMA = {
     materials: {
       type: 'array',
       minItems: 4,
-      maxItems: 12,
       items: {
         type: 'object',
         properties: {
@@ -531,7 +535,6 @@ const ANALYSIS_JSON_SCHEMA = {
     demolitionSteps: {
       type: 'array',
       minItems: 4,
-      maxItems: 8,
       items: {
         type: 'object',
         properties: {
@@ -551,7 +554,6 @@ const ANALYSIS_JSON_SCHEMA = {
         wasteByClass: {
           type: 'array',
           minItems: 3,
-          maxItems: 10,
           items: {
             type: 'object',
             properties: {
@@ -569,7 +571,6 @@ const ANALYSIS_JSON_SCHEMA = {
         equipment: {
           type: 'array',
           minItems: 2,
-          maxItems: 6,
           items: {
             type: 'object',
             properties: { name: { type: 'string' }, spec: { type: 'string' }, reason: { type: 'string' } },

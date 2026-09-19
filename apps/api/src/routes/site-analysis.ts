@@ -8,6 +8,18 @@ import {
 } from '../site-analysis/analyzer.js';
 import type { VolumeEstimator } from '../estimation/provider.js';
 import type { BuildingRegisterClient } from '../public-data/building-register.js';
+import {
+  ANALYSIS_CACHE_TTL_SECONDS,
+  analysisCacheKey,
+  isCacheable,
+  type AnalysisCacheStore,
+} from '../cache/analysis-cache.js';
+
+/**
+ * 캐시 키에 섞는 분석 계약 버전. 프롬프트·스키마·파서를 바꿔 결과 모양이 달라지면
+ * 이 값을 올려 옛 캐시를 통째로 무효화한다(안 올리면 옛 형식이 하루 더 돌아다닌다).
+ */
+const ANALYSIS_CONTRACT_VERSION = 'v3-quote-schema';
 
 /**
  * 현장 사진 AI 분석 API (로드맵 Phase 6).
@@ -21,6 +33,12 @@ import type { BuildingRegisterClient } from '../public-data/building-register.js
  * estimator 는 사진 기반 자동 채움(waste-items)에서 총 중량 추정에 쓴다(디몰비전 VLM 연동 시 교체).
  */
 export interface SiteAnalysisRouterOptions {
+  /**
+   * 분석 결과 캐시(선택). 같은 사진·같은 조건이면 계산을 재사용한다.
+   * 샘플 체험처럼 동일 입력에 트래픽이 몰릴 때 응답을 즉시로 만들고,
+   * 외부 API 호출을 없애 무료 티어 한도에 걸리지 않게 한다.
+   */
+  cache?: AnalysisCacheStore;
   /** 공급자 1곳당 시도 횟수(1 = 재시도 없음). 기본 2 — 일시적 429/503 을 한 번 더 받아준다. */
   attemptsPerAnalyzer?: number;
   /** 재시도 전 대기(ms). 기본 700. */
@@ -36,6 +54,7 @@ export function createSiteAnalysisRouter(
   if (chain.length === 0) throw new Error('분석기 체인이 비어 있습니다.');
   const attempts = Math.max(1, options.attemptsPerAnalyzer ?? 2);
   const retryDelayMs = options.retryDelayMs ?? 700;
+  const cache = options.cache;
   const router = Router();
 
   function parseInput(body: Record<string, unknown>): AnalyzeSiteInput {
@@ -95,6 +114,47 @@ export function createSiteAnalysisRouter(
   }
 
   /**
+   * 캐시를 거쳐 분석한다. 히트면 즉시 반환하고 공급자를 아예 호출하지 않는다.
+   * 캐시가 없거나 미스면 평소대로 체인을 탄다.
+   */
+  async function analyzeCached(input: AnalyzeSiteInput): Promise<SiteAnalysis> {
+    if (!cache) return analyzeWithFallback(input);
+
+    const images = normalizeForKey(input);
+    const key = analysisCacheKey({
+      images,
+      note: input.note,
+      buildingStructure: input.buildingStructure,
+      buildingYear: input.buildingYear,
+      buildingUse: input.buildingUse,
+      version: ANALYSIS_CONTRACT_VERSION,
+    });
+
+    const hit = await cache.get(key);
+    if (hit) return hit;
+
+    const analysis = await analyzeWithFallback(input);
+    if (isCacheable(analysis)) {
+      await cache.set(key, analysis, ANALYSIS_CACHE_TTL_SECONDS);
+    }
+    return analysis;
+  }
+
+  /** 키 계산용 이미지 정규화 — 분석기와 같은 규칙이어야 키가 흔들리지 않는다. */
+  function normalizeForKey(input: AnalyzeSiteInput): { imageBase64: string; mimeType: string }[] {
+    const raw =
+      input.images && input.images.length > 0
+        ? input.images
+        : input.imageBase64
+          ? [{ imageBase64: input.imageBase64, mimeType: input.mimeType }]
+          : [];
+    return raw.map((im) => ({
+      imageBase64: (im.imageBase64 ?? '').replace(/^data:[^,]+,/, '').trim(),
+      mimeType: im.mimeType ?? 'image/jpeg',
+    }));
+  }
+
+  /**
    * 체인을 앞에서부터 시도한다. 입력 자체가 잘못된 경우(검증 오류)는 다음으로 넘겨도
    * 똑같이 실패하므로 즉시 올린다. 마지막 항목까지 실패하면 그 오류를 그대로 던진다.
    */
@@ -133,7 +193,7 @@ export function createSiteAnalysisRouter(
     const input = parseInput(body);
     try {
       const register = await lookupRegister(body);
-      const analysis = await analyzeWithFallback(withRegisterHints(input, register));
+      const analysis = await analyzeCached(withRegisterHints(input, register));
       res.json({ ...analysis, ...(register ? { buildingRegister: register } : {}) });
     } catch (err) {
       if (err instanceof SiteAnalysisValidationError) {
@@ -167,7 +227,7 @@ export function createSiteAnalysisRouter(
         : undefined;
     try {
       const register = await lookupRegister(body);
-      const analysis = await analyzeWithFallback(withRegisterHints(input, register));
+      const analysis = await analyzeCached(withRegisterHints(input, register));
 
       // 대장 값이 사용자가 적어낸 값보다 정확하다 — 연면적은 이미 전체 면적이므로 층수를 곱하지 않는다.
       const area = register?.totalFloorAreaM2 ?? floorAreaM2;

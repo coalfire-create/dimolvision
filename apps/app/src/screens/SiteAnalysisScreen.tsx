@@ -114,7 +114,7 @@ function buildReportText(result: SiteAnalysis, estimate: VolumeEstimate | null):
     '',
     result.disclaimer,
     '',
-    `분석: 디몰비전 (${result.method === 'AI_VISION' ? 'AI 실시간 분석' : '시연용 샘플'}) · https://dimolvision.vercel.app`,
+    `분석: 디몰비전 (${result.method === 'AI_VISION' ? 'AI 분석 결과' : '시연용 샘플'}) · https://dimolvision.vercel.app`,
   );
   return lines.join('\n');
 }
@@ -710,7 +710,7 @@ ${q.costDrivers.length ? `<h2>단가 좌우 요인</h2><ul>${q.costDrivers.map((
 </style></head><body>
 <h1>철거 현장 분석 리포트</h1>
 <p class="meta">디몰비전(DimolVision) · ${new Date(result.analyzedAt).toLocaleString('ko-KR')} ·
-  ${result.method === 'AI_VISION' ? 'AI 실시간 분석' : '시연용 샘플'}</p>
+  ${result.method === 'AI_VISION' ? 'AI 분석 결과' : '시연용 샘플'}</p>
 <div class="box"><h2>현장 요약</h2><p>${e(result.summary)}</p></div>
 ${estBlock}
 <h2>구성 소재 (${result.materials.length})</h2>
@@ -962,7 +962,7 @@ function AnalysisResult({ result, estimate }: { result: SiteAnalysis; estimate: 
             <Text style={styles.summaryLabel}>분석 결과</Text>
             <View style={styles.methodChip}>
               <Text style={styles.methodChipText}>
-                {result.method === 'AI_VISION' ? 'AI 실시간 분석' : '시연용 샘플'}
+                {result.method === 'AI_VISION' ? 'AI 분석 결과' : '시연용 샘플'}
               </Text>
             </View>
           </View>

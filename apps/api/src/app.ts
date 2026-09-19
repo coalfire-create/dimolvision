@@ -12,6 +12,7 @@ import { HeuristicVolumeEstimator } from './estimation/provider.js';
 import { createSiteAnalysisRouter } from './routes/site-analysis.js';
 import { env, activeVisionProvider } from './config/env.js';
 import { BuildingRegisterClient } from './public-data/building-register.js';
+import { createAnalysisCache, type AnalysisCacheStore } from './cache/analysis-cache.js';
 
 /**
  * 디몰비전 API(경량형) — 현장 사진 → 소재/공정/위험 분석 + 물량 추정.
@@ -96,9 +97,26 @@ export function createApp() {
       })
     : undefined;
 
+  // 같은 사진·같은 조건이면 계산을 재사용한다. 샘플 체험처럼 동일 입력에 몰릴 때
+  // 응답이 즉시가 되고 외부 API 호출이 사라져 무료 티어 한도에 걸리지 않는다.
+  //
+  // 캐시 생성은 비동기(Vercel 런타임 모듈 동적 로드)라 첫 요청 때 한 번만 만든다.
+  // createApp 을 async 로 바꾸면 서버리스 진입점이 Promise 를 내보내게 돼 깨진다.
+  let cachePromise: Promise<AnalysisCacheStore> | undefined;
+  const cache: AnalysisCacheStore = {
+    async get(key) {
+      cachePromise ??= createAnalysisCache();
+      return (await cachePromise).get(key);
+    },
+    async set(key, value, ttl) {
+      cachePromise ??= createAnalysisCache();
+      return (await cachePromise).set(key, value, ttl);
+    },
+  };
+
   app.use(
     '/api',
-    createSiteAnalysisRouter(chain, new HeuristicVolumeEstimator(), {}, registry),
+    createSiteAnalysisRouter(chain, new HeuristicVolumeEstimator(), { cache }, registry),
   );
 
   return app;

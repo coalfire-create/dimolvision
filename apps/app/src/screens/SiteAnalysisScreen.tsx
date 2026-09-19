@@ -278,7 +278,7 @@ export function SiteAnalysisScreen() {
 
   return (
     <View style={styles.screen}>
-      <ScreenHeader title="현장 AI 분석 (소재·공정)" canGoBack />
+      <ScreenHeader title="철거 현장 사진 분석" canGoBack />
       <ScrollView contentContainerStyle={styles.content}>
         {/* 상단 히어로 AI 카운트다운/엔진 카드 */}
         <FadeInUp delay={40}>

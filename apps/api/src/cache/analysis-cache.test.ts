@@ -45,7 +45,9 @@ describe('analysisCacheKey', () => {
 
 describe('isCacheable', () => {
   const mk = (method: SiteAnalysis['method']): SiteAnalysis => ({
-    summary: 's', materials: [], demolitionSteps: [], hazards: [],
+    summary: 's',
+    materials: [{ category: 'CONCRETE', name: '벽체', confidence: 'HIGH', recyclable: true, hazardous: false }],
+    demolitionSteps: [], hazards: [],
     method, confidence: 'LOW', disclaimer: 'd', analyzedAt: new Date().toISOString(),
   });
 
@@ -55,6 +57,36 @@ describe('isCacheable', () => {
 
   it('목은 캐시하지 않는다 — 장애를 24시간 굳히게 된다', () => {
     expect(isCacheable(mk('MOCK'))).toBe(false);
+  });
+
+  it('소재를 하나도 못 찾은 결과는 캐시하지 않는다', () => {
+    expect(isCacheable({ ...mk('AI_VISION'), materials: [] })).toBe(false);
+  });
+
+  it('견적 자료가 부실하면 캐시하지 않는다 — 스키마가 안 먹은 응답이다', () => {
+    expect(
+      isCacheable({
+        ...mk('AI_VISION'),
+        quoteBasis: { wasteByClass: [{ wasteClass: 'CONCRETE', estimatedKg: 100, separable: true }], equipment: [], siteChecklist: [], costDrivers: [] },
+      }),
+    ).toBe(false);
+  });
+
+  it('quoteBasis 가 아예 없으면 막지 않는다 — 구형 계약일 수 있다', () => {
+    expect(isCacheable(mk('AI_VISION'))).toBe(true);
+  });
+
+  it('견적 자료가 온전하면 캐시한다', () => {
+    const ok = {
+      ...mk('AI_VISION'),
+      quoteBasis: {
+        wasteByClass: [{ wasteClass: 'CONCRETE', estimatedKg: 100, separable: true }],
+        equipment: [{ name: '굴착기', reason: '해체' }],
+        siteChecklist: ['내력벽 확인'],
+        costDrivers: ['석면 처리'],
+      },
+    } as SiteAnalysis;
+    expect(isCacheable(ok)).toBe(true);
   });
 });
 
@@ -87,7 +119,10 @@ describe('라우터 캐시 연동', () => {
       async analyze(_i: AnalyzeSiteInput): Promise<SiteAnalysis> {
         a.calls += 1;
         return {
-          summary: `호출 ${a.calls}`, materials: [], demolitionSteps: [], hazards: [],
+          summary: `호출 ${a.calls}`,
+          // 소재가 없는 결과는 캐시 대상이 아니므로(부실 응답) 최소 한 건을 낸다.
+          materials: [{ category: 'CONCRETE', name: '벽체', confidence: 'HIGH', recyclable: true, hazardous: false }],
+          demolitionSteps: [], hazards: [],
           method: 'AI_VISION', confidence: 'MEDIUM', disclaimer: 'd', analyzedAt: new Date().toISOString(),
         };
       },

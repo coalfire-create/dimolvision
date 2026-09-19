@@ -450,14 +450,19 @@ export class GroqSiteAnalyzer implements SiteAnalyzer {
     const timer = setTimeout(() => controller.abort(), this.config.timeoutMs);
     const base = this.config.baseUrl ?? 'https://api.groq.com/openai/v1';
     try {
-      const res = await fetch(`${base}/chat/completions`, {
+      const call = (useSchema: boolean) =>
+        fetch(`${base}/chat/completions`, {
         method: 'POST',
         signal: controller.signal,
         headers: { 'content-type': 'application/json', authorization: `Bearer ${this.config.apiKey}` },
         body: JSON.stringify({
           model: this.config.model,
           reasoning_effort: 'none',
-          response_format: { type: 'json_object' },
+          // 스키마를 강제해야 견적 항목이 빠지지 않는다. 모델이 구조화 출력을 지원하지
+          // 않으면 400 이 오므로 그때만 자유 형식으로 되돌린다(분석 자체는 살린다).
+          response_format: useSchema
+            ? { type: 'json_schema', json_schema: { name: 'site_analysis', schema: ANALYSIS_JSON_SCHEMA } }
+            : { type: 'json_object' },
           max_tokens: 1500,
           temperature: 0,
           messages: [
@@ -475,6 +480,11 @@ export class GroqSiteAnalyzer implements SiteAnalyzer {
           ],
         }),
       });
+
+      let res = await call(true);
+      // 400 은 "이 모델은 그 스키마를 못 받는다" 는 뜻이라 자유 형식으로 한 번만 되돌린다.
+      // 그 밖의 오류(429·5xx)는 체인이 다루도록 그대로 올린다.
+      if (res.status === 400) res = await call(false);
       if (!res.ok) throw new VisionProviderError(`groq ${res.status}`, res.status);
       const body = (await res.json()) as { choices?: Array<{ message?: { content?: string } }> };
       return parseVisionJson(body.choices?.[0]?.message?.content ?? '');

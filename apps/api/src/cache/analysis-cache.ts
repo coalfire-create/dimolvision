@@ -123,9 +123,20 @@ export async function createAnalysisCache(): Promise<AnalysisCacheStore> {
 
 /**
  * 캐시에 넣어도 되는 결과인지.
- * 목(MOCK)은 절대 넣지 않는다 — 공급자가 잠깐 막혀 목으로 떨어진 응답을 24시간 굳히면
- * 그 사진은 하루 종일 목만 나온다. 실패를 캐시하는 건 캐시로 장애를 연장하는 짓이다.
+ *
+ * 두 가지를 거른다.
+ * 1) 목(MOCK) — 공급자가 잠깐 막혀 목으로 떨어진 응답을 24시간 굳히면 그 사진은
+ *    하루 종일 목만 나온다. 실패를 캐시하는 건 캐시로 장애를 연장하는 짓이다.
+ * 2) 견적 자료가 부실한 결과 — 스키마를 강제하지 못한 공급자가 응답하면 체크리스트·
+ *    단가요인이 빈 채로 온다. 그걸 굳히면 "장비·현장확인이 안 나오는 사진" 이 생긴다.
+ *    캐시는 좋은 결과를 오래 쓰라고 두는 것이지 나쁜 결과를 고정하라고 두는 게 아니다.
  */
 export function isCacheable(analysis: SiteAnalysis): boolean {
-  return analysis.method === 'AI_VISION';
+  if (analysis.method !== 'AI_VISION') return false;
+  if (analysis.materials.length === 0) return false;
+  const q = analysis.quoteBasis;
+  // quoteBasis 자체가 없는 건 구형 계약일 수 있으니 막지 않는다.
+  // 있는데 핵심 항목이 비어 있으면 스키마가 안 먹은 응답이므로 굳히지 않는다.
+  if (q && (q.siteChecklist.length === 0 || q.wasteByClass.length === 0)) return false;
+  return true;
 }

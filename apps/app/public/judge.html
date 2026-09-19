@@ -54,8 +54,9 @@
         width: 30px; height: 30px; border-radius: 50%; background: var(--primary); color: #fff;
         display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 14px;
       }
-      ol.steps b { display: block; font-size: 15px; }
+      ol.steps .t { display: block; font-weight: 700; font-size: 15px; margin-bottom: 2px; }
       ol.steps span { color: var(--muted); font-size: 14px; }
+      ol.steps span b { font-weight: 700; color: var(--text); }
       .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 12px; }
       .card { background: var(--card); border: 1px solid var(--border); border-radius: 14px; padding: 16px; }
       .card h3 { margin: 0 0 6px; font-size: 15px; }
@@ -73,7 +74,7 @@
   <body>
     <div class="wrap">
       <div class="eyebrow">디몰비전 (DimolVision)</div>
-      <h1>철거 현장 사진 한 장으로<br />견적의 출발점을 만듭니다</h1>
+      <h1>철거 현장 사진으로<br />견적의 출발점을 만듭니다</h1>
       <p class="lead">
         소재 식별 · 철거 공정 · 위험요소 경고 · 폐기물 물량과 운반 트럭 대수까지.
         아래 버튼을 누르면 바로 체험할 수 있습니다.
@@ -88,21 +89,21 @@
       <h2>30초 체험 순서</h2>
       <ol class="steps">
         <li>
-          <b>샘플 사진 한 장 누르기</b>
+          <span class="t">샘플 사진 누르기</span>
           <span>
-            상단 “사진이 없으신가요? 바로 체험해 보세요”에서 3장 중 하나를 클릭합니다.
+            상단 <b>샘플로 바로 체험</b> 영역에서 사진 3장 중 하나를 클릭합니다.
             실제 철거 현장 사진이며, 누르는 즉시 AI 분석이 시작됩니다(약 10~20초).
           </span>
         </li>
         <li>
-          <b>분석 리포트 확인</b>
+          <span class="t">분석 리포트 확인</span>
           <span>
             구성 소재와 예상 중량, 권장 철거 공정, 안전 위험요소가 순서대로 나옵니다.
             결과 상단 칩이 <b>AI 실시간 분석</b>이면 그 사진을 방금 모델이 분석한 것입니다.
           </span>
         </li>
         <li>
-          <b>건물 정보를 넣고 다시 분석</b>
+          <span class="t">건물 정보 입력 후 재분석</span>
           <span>
             연면적에 <b>40</b>, 건축년도에 <b>1985</b>를 넣고 “면적 반영해 다시 분석”을 누르면
             예상 톤수·운반 트럭 대수와 함께 <b>견적 기초자료</b>가 추가됩니다.
@@ -110,7 +111,7 @@
           </span>
         </li>
         <li>
-          <b>직접 찍은 사진으로도 테스트</b>
+          <span class="t">직접 촬영한 사진으로 테스트</span>
           <span>
             “앨범에서 선택”으로 여러 장을 한 번에 올리면 종합 분석합니다.
             사진이 많을수록 식별되는 소재가 늘어납니다.

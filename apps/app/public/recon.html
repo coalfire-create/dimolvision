@@ -59,6 +59,31 @@
       .gl li { margin-bottom: 2px; }
       .gwarn { margin: 10px 0 0; padding: 9px 11px; background: var(--warnbg); border: 1px solid var(--warnbd);
                border-radius: 8px; font-size: 12px; color: #78350f; }
+      .ox { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 10px 0; }
+      .ox > div { border-radius: 10px; padding: 10px; text-align: center; }
+      .ox .ok { background: #ecfdf5; border: 1.5px solid #6ee7b7; }
+      .ox .no { background: #fef2f2; border: 1.5px solid #fca5a5; }
+      .ox b { display: block; font-size: 12px; margin-bottom: 6px; }
+      .ox .ok b { color: #047857; }
+      .ox .no b { color: #b91c1c; }
+      .ox .fig { font-size: 20px; line-height: 1.4; }
+      .ox .fig span { display: block; font-size: 11px; color: var(--muted); margin-top: 2px; }
+
+      /* 촬영 판정 차단 */
+      .blk { margin-top: 14px; background: #fef2f2; border: 2px solid #f87171;
+             border-radius: 12px; padding: 16px; }
+      .blk h3 { margin: 0 0 8px; font-size: 16px; color: #b91c1c; }
+      .blk .why { font-size: 13px; line-height: 1.7; margin: 0 0 8px; color: #7f1d1d; }
+      .blk .measured { font-size: 12px; color: #991b1b; background: #fee2e2;
+                       border-radius: 8px; padding: 8px 10px; margin: 0 0 10px; }
+      .blk .howto { background: #fff; border-radius: 10px; padding: 12px; font-size: 13px; }
+      .blk .howto > b { display: block; margin-bottom: 6px; }
+      .blk .howto ul { margin: 0; padding-left: 18px; }
+      .blk .howto li { margin-bottom: 6px; line-height: 1.6; }
+      .blk button { margin-top: 10px; }
+      .blk button.ghost { background: none; color: var(--muted); border: 1px solid var(--border);
+                          font-weight: 600; font-size: 13px; padding: 10px; }
+
       .presets { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 8px; margin: 12px 0; }
       .preset { display: block; width: 100%; text-align: left; background: #fff; border: 1.5px solid var(--border);
                 border-radius: 10px; padding: 10px 12px; cursor: pointer; font: inherit; color: inherit; margin: 0; }
@@ -100,9 +125,20 @@
             <li><b>무늬 있는 곳을 포함</b> — 민무늬 벽만 찍으면 맞출 기준점이 없습니다.
               가구·배관·바닥 패턴·창틀이 화면에 들어오게 하세요</li>
           </ul>
+          <div class="ox">
+            <div class="ok">
+              <b>O 이렇게</b>
+              <div class="fig">🧍‍♂️→→→<br><span>벽을 보며 옆으로 걷기</span></div>
+            </div>
+            <div class="no">
+              <b>X 이렇게 하면 실패</b>
+              <div class="fig">🧍‍♂️↻<br><span>제자리에서 카메라만 돌리기</span></div>
+            </div>
+          </div>
           <p class="gwarn">
-            실측: 제자리 회전이 섞인 영상은 112장을 넣어도 27장만 복원됐습니다.
-            나머지는 시차가 없어 버려집니다.
+            <b>업로드하면 촬영 방식을 자동으로 검사합니다.</b> 제자리 회전으로 판정되면
+            복원을 진행하지 않고 다시 찍도록 안내합니다 — 실측에서 그런 영상은 112장을
+            넣어도 27장만 복원됐고, 나머지는 시차가 없어 버려졌습니다.
           </p>
         </div>
         <label class="file" for="file">
@@ -123,6 +159,7 @@
         <div class="bar"><i id="bar"></i></div>
         <div id="stage"></div>
         <div id="error" class="err hidden"></div>
+        <div id="captureBlock" class="blk hidden"></div>
       </div>
 
       <div id="result" class="card hidden">
@@ -174,6 +211,143 @@
 // 60장 근처가 정확도 대비 시간이 가장 낫다. 그 이상은 복원 안 되는 프레임만 늘린다.
 const SAMPLE = 72, KEEP = 60, MAX_EDGE = 1600;
 
+      // ── 촬영 판정: 시차(parallax)가 있는가 ──────────────────────────
+      // 3D 는 "같은 지점을 다른 위치에서 본 차이" 로 깊이를 만든다. 제자리에서 카메라만
+      // 돌리면 그 차이가 0 이라 원리적으로 복원되지 않는다. 실측에서 이 영상은 프레임을
+      // 28장 → 60장 → 112장으로 늘려도 붙는 프레임이 27장에서 그대로였다. 데이터가 아니라
+      // 촬영이 문제였던 것이다.
+      //
+      // 판별법: 프레임 사이 블록별 이동량을 본다.
+      //   카메라만 회전 → 화면 전체가 **같은 양**으로 흐른다(이동량 편차 ≈ 0)
+      //   실제로 걸음   → 가까운 것이 멀리 있는 것보다 **많이** 움직인다(편차가 생긴다)
+      // 그래서 GPU 를 쓰기 전에 여기서 걸러내고 다시 찍게 한다.
+      const TW = 192;          // 판정용 축소 폭
+      const PATCH = 28;        // 블록 한 변
+      const SEARCH = 6;        // 이동 탐색 반경(px)
+      const GRID = 3;          // 3×3 블록
+
+      /** 프레임을 판정용 그레이스케일 축소본으로. 원본을 들고 있으면 메모리가 터진다. */
+      function toTiny(data, w, h) {
+        const th = Math.max(8, Math.round((TW * h) / w));
+        const g = new Uint8Array(TW * th);
+        for (let y = 0; y < th; y++) {
+          const sy = Math.min(h - 1, Math.round((y * h) / th));
+          for (let x = 0; x < TW; x++) {
+            const sx = Math.min(w - 1, Math.round((x * w) / TW));
+            const p = (sy * w + sx) * 4;
+            g[y * TW + x] = (data[p] * 299 + data[p + 1] * 587 + data[p + 2] * 114) / 1000;
+          }
+        }
+        return { g, w: TW, h: th };
+      }
+
+      /** 블록 하나의 대비. 민무늬 벽은 어디로 움직였는지 알 수 없어 판정에서 뺀다. */
+      function patchContrast(t, x0, y0) {
+        let mn = 255, mx = 0;
+        for (let y = 0; y < PATCH; y += 2) {
+          for (let x = 0; x < PATCH; x += 2) {
+            const v = t.g[(y0 + y) * t.w + (x0 + x)];
+            if (v < mn) mn = v;
+            if (v > mx) mx = v;
+          }
+        }
+        return mx - mn;
+      }
+
+      /** 두 프레임 사이 블록별 이동량(SAD 최소 지점). */
+      function blockShifts(a, b) {
+        const out = [];
+        for (let by = 0; by < GRID; by++) {
+          for (let bx = 0; bx < GRID; bx++) {
+            const cx = Math.round(((bx + 0.5) * a.w) / GRID - PATCH / 2);
+            const cy = Math.round(((by + 0.5) * a.h) / GRID - PATCH / 2);
+            const x0 = Math.max(SEARCH, Math.min(a.w - PATCH - SEARCH, cx));
+            const y0 = Math.max(SEARCH, Math.min(a.h - PATCH - SEARCH, cy));
+            if (x0 < 0 || y0 < 0) continue;
+            const contrast = patchContrast(a, x0, y0);
+            if (contrast < 25) continue; // 민무늬 — 맞출 기준점이 없다
+
+            let bestSad = Infinity, bdx = 0, bdy = 0;
+            for (let dy = -SEARCH; dy <= SEARCH; dy++) {
+              for (let dx = -SEARCH; dx <= SEARCH; dx++) {
+                let sad = 0;
+                for (let y = 0; y < PATCH; y += 2) {
+                  const ra = (y0 + y) * a.w + x0;
+                  const rb = (y0 + y + dy) * b.w + x0 + dx;
+                  for (let x = 0; x < PATCH; x += 2) {
+                    const d = a.g[ra + x] - b.g[rb + x];
+                    sad += d < 0 ? -d : d;
+                  }
+                }
+                if (sad < bestSad) { bestSad = sad; bdx = dx; bdy = dy; }
+              }
+            }
+            out.push({ dx: bdx, dy: bdy });
+          }
+        }
+        return out;
+      }
+
+      const median = (arr) => {
+        if (arr.length === 0) return 0;
+        const s = [...arr].sort((x, y) => x - y);
+        return s[Math.floor(s.length / 2)];
+      };
+
+      /**
+       * 촬영 판정. 프레임 쌍을 표본으로 훑어 시차가 있는 구간의 비율을 낸다.
+       * 반환: { verdict, movingRatio, stillRatio, texturelessRatio, pairs }
+       */
+      function assessCapture(frames) {
+        const tinies = frames.map((f) => f.tiny).filter(Boolean);
+        if (tinies.length < 6) return { verdict: 'UNKNOWN', movingRatio: 0, pairs: 0 };
+
+        // 인접 프레임은 차이가 너무 작아 잡음에 묻힌다. 몇 장 건너뛴 쌍을 본다.
+        const GAP = 2;
+        const samples = [];
+        for (let i = 0; i + GAP < tinies.length; i += Math.max(1, Math.floor(tinies.length / 24))) {
+          samples.push([tinies[i], tinies[i + GAP]]);
+        }
+
+        let moving = 0, still = 0, rotating = 0, textureless = 0;
+        const raw = [];
+        for (const [a, b] of samples) {
+          const sh = blockShifts(a, b);
+          if (sh.length < 4) { textureless++; continue; }
+          const mags = sh.map((s) => Math.hypot(s.dx, s.dy));
+          const motion = median(mags);
+          // 편차 = 블록들이 서로 얼마나 다르게 움직였나. 이게 시차의 크기다.
+          const mean = mags.reduce((x, y) => x + y, 0) / mags.length;
+          const spread = Math.sqrt(mags.reduce((x, y) => x + (y - mean) ** 2, 0) / mags.length);
+
+          // 절대 편차가 아니라 **이동량 대비 편차**로 본다. 빠르게 훑든 천천히 훑든,
+          // 회전만 하면 화면이 통째로 같은 양만큼 흐르므로 이 비율이 낮게 유지된다.
+          // 실측(제자리 회전 영상): motion 8.5px 에 spread 0.94px — 비율 0.11.
+          // 옆으로 걸으면 가까운 것과 먼 것의 이동량이 몇 배씩 벌어져 비율이 크게 올라간다.
+          const ratio = motion > 0 ? spread / motion : 0;
+          raw.push({ motion: +motion.toFixed(2), spread: +spread.toFixed(2), ratio: +ratio.toFixed(3) });
+          if (motion < 0.8) still++;
+          else if (ratio >= 0.22 && spread >= 0.8) moving++;
+          else rotating++;
+        }
+        window.__captureRaw = raw;
+        const n = samples.length || 1;
+        const movingRatio = moving / n;
+        const verdict =
+          textureless / n > 0.5 ? 'TEXTURELESS'
+          : still / n > 0.6 ? 'STILL'
+          : movingRatio < 0.35 ? 'ROTATING'
+          : 'OK';
+        return {
+          verdict,
+          movingRatio,
+          stillRatio: still / n,
+          rotatingRatio: rotating / n,
+          texturelessRatio: textureless / n,
+          pairs: n,
+        };
+      }
+
       function sharpness(data, w, h) {
         // 라플라시안 응답의 분산 — 흔들린 프레임은 고주파가 사라져 값이 급락한다.
         const g = new Float32Array(w * h);
@@ -224,8 +398,16 @@ const SAMPLE = 72, KEEP = 60, MAX_EDGE = 1600;
               lastT = v.currentTime;
               ctx.drawImage(v, 0, 0, w, h);
               const img = ctx.getImageData(0, 0, w, h);
+              // 원본 base64 는 전송용, tiny 는 촬영 판정용. 판정에 원본을 쓰면 느리고 무겁다.
               const b64 = cv.toDataURL('image/jpeg', 0.82).split(',')[1];
-              if (b64) frames.push({ base64: b64, timeSec: v.currentTime, sharpness: sharpness(img.data, w, h) });
+              if (b64) {
+                frames.push({
+                  base64: b64,
+                  timeSec: v.currentTime,
+                  sharpness: sharpness(img.data, w, h),
+                  tiny: toTiny(img.data, w, h),
+                });
+              }
               onProgress(frames.length, want);
             }
             if (v.ended) { finish(); return; }
@@ -240,7 +422,125 @@ const SAMPLE = 72, KEEP = 60, MAX_EDGE = 1600;
         });
       }
 
-      async function extractFrames(file, onProgress) {
+      /**
+       * 전송 예산에 맞춰 프레임을 다시 인코딩한다.
+       *
+       * Vercel 함수의 요청 본문 상한이 4.5MB 다(실측: 4MB 통과, 5MB 에서 413
+       * FUNCTION_PAYLOAD_TOO_LARGE). 60장 × 1600px q0.82 는 6.6MB 라 그냥 막힌다.
+       *
+       * 줄이는 방법은 둘인데 **해상도보다 화질을 먼저 깎는다**. SIFT 특징점은 JPEG
+       * 압축 잡음에는 비교적 강하지만 해상도가 내려가면 검출 가능한 특징 자체가 줄어
+       * 정합률이 직접 떨어진다. 그래도 모자라면 그때 장수를 줄인다.
+       */
+      const PAYLOAD_BUDGET = 4.0 * 1024 * 1024;
+
+      function payloadBytes(frames) {
+        return frames.reduce((n, f) => n + f.base64.length, 0);
+      }
+
+      async function reencode(frames, quality) {
+        const cv = document.createElement('canvas');
+        const ctx = cv.getContext('2d');
+        const out = [];
+        for (const f of frames) {
+          const img = new Image();
+          img.src = 'data:image/jpeg;base64,' + f.base64;
+          await img.decode();
+          cv.width = img.naturalWidth; cv.height = img.naturalHeight;
+          ctx.drawImage(img, 0, 0);
+          out.push({ ...f, base64: cv.toDataURL('image/jpeg', quality).split(',')[1] });
+        }
+        return out;
+      }
+
+      async function fitToBudget(frames, onProgress) {
+        let cur = frames;
+        let quality = 0.82;
+        for (let pass = 0; pass < 3; pass++) {
+          const bytes = payloadBytes(cur);
+          if (bytes <= PAYLOAD_BUDGET) return cur;
+          // 필요한 축소 비율만큼 화질을 내린다. JPEG 은 화질과 크기가 선형이 아니라
+          // 한 번에 맞지 않을 수 있어 몇 번 되짚는다.
+          quality = Math.max(0.45, quality * Math.sqrt(PAYLOAD_BUDGET / bytes));
+          onProgress(`${(bytes / 1024 / 1024).toFixed(1)}MB → 전송 크기 줄이는 중 (화질 ${quality.toFixed(2)})`);
+          cur = await reencode(cur, quality);
+        }
+        // 화질을 내려도 안 되면(아주 고해상도 영상) 장수를 줄인다 — 마지막 수단이다.
+        while (payloadBytes(cur) > PAYLOAD_BUDGET && cur.length > 24) {
+          cur = pickSpread(cur, Math.floor(cur.length * 0.85));
+        }
+        return cur;
+      }
+
+      /**
+       * 판정별 안내. "다시 찍으세요" 로 끝내지 않고 **무엇을 어떻게 바꿔야 하는지**를 쓴다.
+       * 사용자는 자기가 뭘 잘못했는지 모르는 채로 같은 실수를 반복한다.
+       */
+      const CAPTURE_HELP = {
+        ROTATING: {
+          title: '제자리에서 카메라만 돌리셨습니다',
+          why:
+            '3D 는 같은 지점을 <b>다른 위치에서</b> 본 차이로 깊이를 계산합니다. 한자리에 서서 ' +
+            '카메라만 돌리면 그 차이가 0 이라 원리적으로 복원되지 않습니다. 프레임을 아무리 ' +
+            '많이 넣어도 결과는 같습니다.',
+          how: [
+            '벽에서 <b>2~3m 떨어져</b> 벽을 바라본 채로 <b>옆으로 걸으세요</b>. 게걸음처럼.',
+            '카메라는 벽을 향해 고정하고, <b>몸이 이동</b>해야 합니다. 손목으로 훑지 마세요.',
+            '건물을 <b>한 바퀴 돌며</b> 30초 이상 찍으세요. 모서리에서도 멈추지 말고 계속 걸으세요.',
+            '가구·배관·창틀처럼 무늬가 있는 것이 화면에 들어오게 하세요.',
+          ],
+        },
+        STILL: {
+          title: '카메라가 거의 움직이지 않았습니다',
+          why: '한 자리에서 정지한 채로 찍으면 다른 시점이 없어 3D 를 만들 수 없습니다.',
+          how: [
+            '벽을 바라본 채 <b>옆으로 걸으며</b> 촬영하세요.',
+            '30초 이상, 건물 한 면을 따라 끝까지 이동하세요.',
+          ],
+        },
+        TEXTURELESS: {
+          title: '맞출 기준점이 없습니다',
+          why:
+            '민무늬 벽·천장만 잡히면 두 사진에서 같은 지점을 찾을 수 없습니다. ' +
+            '사람 눈에는 벽이 보이지만 계산에는 아무 단서가 없습니다.',
+          how: [
+            '가구·배관·창틀·타일 줄눈·바닥 패턴이 화면에 들어오게 하세요.',
+            '너무 가까이 붙지 말고 <b>2~3m</b> 떨어져 넓게 담으세요.',
+            '어두우면 조명을 켜세요. 노출이 날아가면 무늬가 사라집니다.',
+          ],
+        },
+      };
+
+      function showCaptureBlock(capture, onOverride) {
+        const help = CAPTURE_HELP[capture.verdict];
+        if (!help) return false;
+        const box = $('captureBlock');
+        box.classList.remove('hidden');
+        box.innerHTML =
+          `<h3>${help.title}</h3>` +
+          `<p class="why">${help.why}</p>` +
+          `<p class="measured">측정: 시차가 확인된 구간 ${Math.round(capture.movingRatio * 100)}% ` +
+          `(복원에는 35% 이상 필요) · 검사한 프레임 쌍 ${capture.pairs}개</p>` +
+          '<div class="howto"><b>이렇게 다시 찍어 주세요</b><ul>' +
+          help.how.map((h) => `<li>${h}</li>`).join('') +
+          '</ul></div>' +
+          '<button type="button" id="reshoot">다시 촬영하기</button>' +
+          '<button type="button" id="anyway" class="ghost">그래도 복원 시도 (실패 가능성 높음)</button>';
+        $('reshoot').addEventListener('click', () => {
+          box.classList.add('hidden');
+          $('file').value = '';
+          $('go').disabled = true;
+          $('fileName').textContent = '';
+          window.scrollTo({ top: 0, behavior: 'smooth' });
+        });
+        $('anyway').addEventListener('click', () => {
+          box.classList.add('hidden');
+          onOverride();
+        });
+        return true;
+      }
+
+      async function extractFrames(file, onProgress, onStage) {
         const url = URL.createObjectURL(file);
         const v = document.createElement('video');
         v.preload = 'auto'; v.muted = true; v.playsInline = true; v.src = url;
@@ -263,7 +563,14 @@ const SAMPLE = 72, KEEP = 60, MAX_EDGE = 1600;
           if (frames.length < 8) {
             throw new Error(`프레임을 ${frames.length}장만 얻었습니다. 영상이 너무 짧거나 재생되지 않았습니다.`);
           }
-          return pickSpread(frames, Math.min(KEEP, frames.length));
+          // 시차 판정은 **골라낸 프레임** 기준으로 한다 — 실제로 복원에 들어갈 것들이다.
+          const picked = pickSpread(frames, Math.min(KEEP, frames.length));
+          const capture = assessCapture(picked);
+          window.__captureVerdict = capture.verdict;
+          // tiny 는 판정용이라 여기서 버린다(그대로 두면 메모리를 붙들고 있다).
+          for (const f of picked) delete f.tiny;
+          const fitted = await fitToBudget(picked, onStage);
+          return { frames: fitted, capture };
         } finally {
           URL.revokeObjectURL(url); v.removeAttribute('src'); v.load();
         }
@@ -456,13 +763,37 @@ const SAMPLE = 72, KEEP = 60, MAX_EDGE = 1600;
         $('go').disabled = true;
         $('error').classList.add('hidden');
         $('result').classList.add('hidden');
+        $('captureBlock').classList.add('hidden');
         try {
           setStage('영상에서 프레임을 뽑는 중…', 2);
-          const frames = await extractFrames(picked, (d, t) => {
-            setStage(`영상에서 프레임을 뽑는 중… ${d}/${t}`, (d / t) * 35);
-          });
+          const { frames, capture } = await extractFrames(
+            picked,
+            (d, t) => setStage(`영상에서 프레임을 뽑는 중… ${d}/${t}`, (d / t) * 35),
+            (msg) => setStage(msg, 40),
+          );
           if (frames.length < 8) throw new Error('쓸 만한 프레임이 부족합니다. 더 길게, 천천히 촬영해 주세요.');
 
+          // 촬영이 복원 불가능한 종류면 GPU 를 쓰기 전에 멈춘다. 수 분을 기다리게 한 뒤
+          // "실패했습니다" 를 보여 주는 건 시간도 비용도 낭비고, 무엇보다 사용자가
+          // 무엇을 바꿔야 하는지 모른 채 같은 촬영을 반복하게 만든다.
+          setStage('', 42);
+          if (showCaptureBlock(capture, () => runReconstruct(frames))) {
+            $('go').disabled = false;
+            return;
+          }
+          await runReconstruct(frames);
+        } catch (e) {
+          showError(e.message || '복원 중 문제가 발생했습니다.');
+        } finally {
+          $('go').disabled = false;
+          setStage('');
+        }
+      });
+
+      async function runReconstruct(frames) {
+        $('go').disabled = true;
+        $('error').classList.add('hidden');
+        try {
           setStage(`${frames.length}장으로 3D 복원 중… 수 분 걸립니다`, 45);
           // exhaustive 는 모든 쌍을 비교한다. 손으로 든 촬영은 인접 프레임 겹침이
           // 들쭉날쭉해 sequential 로는 놓치는 쌍이 많았다(실측 4/28 → 27/60).
@@ -499,7 +830,7 @@ const SAMPLE = 72, KEEP = 60, MAX_EDGE = 1600;
           $('go').disabled = false;
           setStage('');
         }
-      });
+      }
     </script>
   </body>
 </html>

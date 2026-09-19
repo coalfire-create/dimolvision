@@ -86,6 +86,13 @@ export interface AnalyzeSiteInput {
   buildingYear?: number;
   /** 건축물대장 주용도 (예: 단독주택, 제2종근린생활시설) — 자재 추정 힌트. */
   buildingUse?: string;
+  /**
+   * 건축물대장 연면적(㎡)과 지상 층수.
+   * 물량·공기·인원·장비 규모를 사진만으로 잡으면 크게 빗나간다. 실제 크기를 알려주면
+   * 모델이 "보이는 것" 을 "이만한 건물의 일부" 로 환산해 답을 맞춰 나간다.
+   */
+  totalFloorAreaM2?: number;
+  floorsAbove?: number;
 }
 
 export interface SiteAnalyzer {
@@ -140,7 +147,7 @@ export function buildUserInstruction(
   note: string | undefined,
   buildingStructure: string | undefined,
   imageCount: number,
-  building?: { year?: number; use?: string },
+  building?: { year?: number; use?: string; areaM2?: number; floors?: number },
 ): string {
   const multi =
     imageCount > 1
@@ -162,6 +169,16 @@ export function buildUserInstruction(
         ? `\n[건축물대장] 사용승인 ${building.year}년 — 석면 사용이 전면 금지된 ${ASBESTOS_BAN_YEAR}년 이전 건축물입니다. ` +
           '슬레이트 지붕재·천장 텍스·배관 보온재·뿜칠 내화피복에 석면 함유 가능성이 있으니 해당 부위가 보이면 석면 의심으로 다루세요(확정 표현 금지).'
         : `\n[건축물대장] 사용승인 ${building.year}년 — 석면 사용 금지(${ASBESTOS_BAN_YEAR}년) 이후 건축물이라 석면 자재 가능성은 낮습니다. 다만 증축·리모델링 부위는 예외일 수 있습니다.`;
+  }
+  if (building?.areaM2 !== undefined && building.areaM2 > 0) {
+    // 사진에는 건물의 일부만 담긴다. 전체 규모를 알려주면 모델이 물량·공기·인원을
+    // "보이는 만큼" 이 아니라 "이 건물만큼" 으로 잡는다 — 견적 오차가 가장 크게 줄어드는 지점이다.
+    const floors = building.floors && building.floors > 0 ? building.floors : undefined;
+    base +=
+      `\n[건축물대장] 연면적 ${Math.round(building.areaM2).toLocaleString('ko-KR')}㎡` +
+      (floors ? ` · 지상 ${floors}층` : '') +
+      '. 사진은 이 건물의 일부만 보여 줍니다. wasteByClass 의 총량과 estimatedWorkDays·' +
+      'estimatedCrewSize·장비 규모는 사진에 보이는 범위가 아니라 **이 연면적 전체**를 철거하는 기준으로 내세요.';
   }
   if (note) {
     base += `\n[현장 메모] ${note}`;
@@ -232,6 +249,20 @@ const SYSTEM_PROMPT = [
   '참고 밀도: 철근콘크리트 2,400kg/㎥, 시멘트 몰탈 2,100, 벽돌 조적 1,900, 타일 2,000,',
   '석고보드 약 9kg/㎡(9.5T), 목재 500, 철강 7,850.',
   '보이지 않는 부분까지 상상해서 부풀리지 마세요.',
+  '',
+  '[분류가 곧 돈이다 — wasteClass 와 separable 을 신중히 고르세요]',
+  '아래는 실제 공표 처리단가(원/톤)입니다. 같은 물량이라도 어느 분류로 나가느냐에 따라 견적이 5배 달라집니다.',
+  '- 폐콘크리트(순수) 29,396 / 건설폐재류(가연성 제거) 48,021',
+  '- 혼합건설폐기물(가연성 5% 이하) 68,563 / 불연성+가연성 혼합 168,424',
+  '- 폐보드류·폐판넬 혼합 173,154 / 폐석면(지정폐기물) 645,000',
+  '그러므로 분리 배출이 현실적으로 가능한 물량을 MIXED 로 뭉뚱그리지 마세요.',
+  '반대로 마감재가 콘크리트에 붙은 채 뜯겨 나올 부위를 CONCRETE 로 잡지도 마세요 — 그건 실제로 혼합으로 나갑니다.',
+  'separable 은 "현장에서 사람이 분리해 따로 쌓을 수 있는가" 입니다. 해체 순서상 먼저 뜯어내는 마감재는 true,',
+  '구조체와 함께 부서져 섞이는 것은 false 입니다.',
+  '',
+  '[장비 표기] equipment 의 spec 에는 규격을 숫자로 쓰세요(예: "0.6㎥", "1.0㎥").',
+  '규격이 있어야 시간당 기계경비를 계산할 수 있습니다. 굴착기는 0.2 / 0.4 / 0.6 / 1.0㎥ 중에서 고르고,',
+  '부착장비는 "압쇄기", "대형브레이커" 처럼 이름을 그대로 쓰세요.',
   '',
   '[신뢰도] HIGH 는 소재가 명확히 식별될 때만. 가려지거나 흐릿하면 LOW 를 쓰세요.',
   '모든 텍스트는 한국어로 작성합니다.',
@@ -392,7 +423,12 @@ export class GeminiSiteAnalyzer implements SiteAnalyzer {
                   ...images.map((im) => ({
                     inline_data: { mime_type: im.mimeType, data: im.imageBase64 },
                   })),
-                  { text: buildUserInstruction(input.note, input.buildingStructure, images.length, { year: input.buildingYear, use: input.buildingUse }) },
+                  { text: buildUserInstruction(input.note, input.buildingStructure, images.length, {
+                    year: input.buildingYear,
+                    use: input.buildingUse,
+                    areaM2: input.totalFloorAreaM2,
+                    floors: input.floorsAbove,
+                  }) },
                 ],
               },
             ],
@@ -470,7 +506,12 @@ export class GroqSiteAnalyzer implements SiteAnalyzer {
             {
               role: 'user',
               content: [
-                { type: 'text', text: buildUserInstruction(input.note, input.buildingStructure, images.length, { year: input.buildingYear, use: input.buildingUse }) },
+                { type: 'text', text: buildUserInstruction(input.note, input.buildingStructure, images.length, {
+                    year: input.buildingYear,
+                    use: input.buildingUse,
+                    areaM2: input.totalFloorAreaM2,
+                    floors: input.floorsAbove,
+                  }) },
                 ...images.map((im) => ({
                   type: 'image_url' as const,
                   image_url: { url: `data:${im.mimeType};base64,${im.imageBase64}` },
@@ -661,6 +702,8 @@ export class SelfHostedVlmAnalyzer implements SiteAnalyzer {
                     buildUserInstruction(input.note, input.buildingStructure, images.length, {
                       year: input.buildingYear,
                       use: input.buildingUse,
+                      areaM2: input.totalFloorAreaM2,
+                      floors: input.floorsAbove,
                     }) + VLM_SPECIFICITY_HINT,
                 },
                 ...images.map((im) => ({
@@ -711,7 +754,12 @@ export class ClaudeSiteAnalyzer implements SiteAnalyzer {
                   type: 'image' as const,
                   source: { type: 'base64' as const, media_type: im.mimeType, data: im.imageBase64 },
                 })),
-                { type: 'text', text: buildUserInstruction(input.note, input.buildingStructure, images.length, { year: input.buildingYear, use: input.buildingUse }) },
+                { type: 'text', text: buildUserInstruction(input.note, input.buildingStructure, images.length, {
+                    year: input.buildingYear,
+                    use: input.buildingUse,
+                    areaM2: input.totalFloorAreaM2,
+                    floors: input.floorsAbove,
+                  }) },
               ],
             },
           ],

@@ -191,3 +191,26 @@ describe('라우터 캐시 연동', () => {
     expect(a.calls).toBe(2);
   });
 });
+
+describe('analysisCacheKey — 규모 힌트', () => {
+  const img = [{ imageBase64: 'AAAA', mimeType: 'image/jpeg' }];
+
+  it('연면적이 다르면 키가 갈린다', () => {
+    // 같은 사진이라도 40평 건물과 400평 건물은 물량·공기·장비가 전혀 다르다.
+    // 키가 같으면 한쪽 결과를 다른 쪽에 그대로 돌려주게 된다.
+    const a = analysisCacheKey({ images: img, totalFloorAreaM2: 132, version: 'v5' });
+    const b = analysisCacheKey({ images: img, totalFloorAreaM2: 1320, version: 'v5' });
+    expect(a).not.toBe(b);
+  });
+
+  it('층수가 다르면 키가 갈린다', () => {
+    const a = analysisCacheKey({ images: img, floorsAbove: 1, version: 'v5' });
+    const b = analysisCacheKey({ images: img, floorsAbove: 5, version: 'v5' });
+    expect(a).not.toBe(b);
+  });
+
+  it('같은 조건이면 같은 키다', () => {
+    const args = { images: img, totalFloorAreaM2: 132, floorsAbove: 2, version: 'v5' };
+    expect(analysisCacheKey(args)).toBe(analysisCacheKey({ ...args }));
+  });
+});

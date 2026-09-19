@@ -33,7 +33,7 @@ import {
  * 캐시 키에 섞는 분석 계약 버전. 프롬프트·스키마·파서를 바꿔 결과 모양이 달라지면
  * 이 값을 올려 옛 캐시를 통째로 무효화한다(안 올리면 옛 형식이 하루 더 돌아다닌다).
  */
-const ANALYSIS_CONTRACT_VERSION = 'v4-groq-schema';
+const ANALYSIS_CONTRACT_VERSION = 'v5-cost-aware';
 
 /**
  * 현장 사진 AI 분석 API (로드맵 Phase 6).
@@ -99,6 +99,13 @@ export function createSiteAnalysisRouter(
       buildingStructure: typeof body.buildingStructure === 'string' ? body.buildingStructure : undefined,
       buildingYear: typeof body.buildingYear === 'number' ? body.buildingYear : undefined,
       buildingUse: typeof body.buildingUse === 'string' ? body.buildingUse : undefined,
+      // 사용자가 연면적을 직접 입력한 경우에도 모델에게 규모를 알려 준다.
+      totalFloorAreaM2:
+        typeof body.floorAreaM2 === 'number' && body.floorAreaM2 > 0 ? body.floorAreaM2 : undefined,
+      floorsAbove:
+        typeof body.floors === 'number' && Number.isInteger(body.floors) && body.floors > 0
+          ? body.floors
+          : undefined,
     };
   }
 
@@ -130,6 +137,9 @@ export function createSiteAnalysisRouter(
       buildingStructure: input.buildingStructure ?? register.structureName,
       buildingYear: input.buildingYear ?? register.approvedYear,
       buildingUse: input.buildingUse ?? register.mainUse,
+      // 연면적·층수는 사진에 안 보이는 정보라 모델이 가장 크게 틀리는 지점이다.
+      totalFloorAreaM2: input.totalFloorAreaM2 ?? register.totalFloorAreaM2,
+      floorsAbove: input.floorsAbove ?? register.floorsAbove,
     };
   }
 
@@ -147,6 +157,8 @@ export function createSiteAnalysisRouter(
       buildingStructure: input.buildingStructure,
       buildingYear: input.buildingYear,
       buildingUse: input.buildingUse,
+      totalFloorAreaM2: input.totalFloorAreaM2,
+      floorsAbove: input.floorsAbove,
       version: ANALYSIS_CONTRACT_VERSION,
     });
 

@@ -26,6 +26,9 @@ export interface AnalysisCacheKeyInput {
   buildingStructure?: string;
   buildingYear?: number;
   buildingUse?: string;
+  /** 연면적·층수도 결과를 바꾼다 — 같은 사진이라도 규모가 다르면 물량·공기가 달라진다. */
+  totalFloorAreaM2?: number;
+  floorsAbove?: number;
   /** 프롬프트·스키마가 바뀌면 옛 캐시를 버려야 하므로 버전을 섞는다. */
   version: string;
 }
@@ -43,6 +46,8 @@ export function analysisCacheKey(input: AnalysisCacheKeyInput): string {
     input.buildingStructure ?? '',
     input.buildingYear ?? '',
     input.buildingUse ?? '',
+    input.totalFloorAreaM2 ?? '',
+    input.floorsAbove ?? '',
     input.version,
   ]);
   return createHash('sha256').update(`${imagePart}#${hintPart}`).digest('hex');

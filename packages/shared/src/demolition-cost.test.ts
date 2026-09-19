@@ -230,3 +230,42 @@ describe('장비비 계상 규칙', () => {
     expect(r.lines.map((l) => l.key)).not.toContain('EQUIPMENT');
   });
 });
+
+describe('수집·운반비 분류', () => {
+  it('폐콘크리트는 분리 실패해도 덤프 단가로 운반한다', () => {
+    // 덤프냐 암롤이냐는 적재 비중이 가른다(1.6 vs 0.63톤/㎥). 오염된 폐콘크리트도
+    // 콘크리트 무게로 실린다. separable 로 가르면 같은 물량의 운반비가 3배로 튄다.
+    const sep = estimateDemolitionCost({
+      wasteByClass: [{ wasteClass: 'CONCRETE', estimatedKg: 100_000, separable: true }],
+    });
+    const mixed = estimateDemolitionCost({
+      wasteByClass: [{ wasteClass: 'CONCRETE', estimatedKg: 100_000, separable: false }],
+    });
+    const t = (r: ReturnType<typeof estimateDemolitionCost>) =>
+      r.lines.find((l) => l.key === 'TRANSPORT')!;
+    expect(t(mixed).maxWon).toBe(t(sep).maxWon);
+    expect(t(sep).detail[0]).toContain('건설폐재류');
+  });
+
+  it('석면 운반비는 금액에 넣지 않고 별도 견적이라고 적는다', () => {
+    const r = estimateDemolitionCost({
+      wasteByClass: [
+        { wasteClass: 'CONCRETE', estimatedKg: 50_000, separable: true },
+        { wasteClass: 'DESIGNATED', estimatedKg: 2_000, separable: false },
+      ],
+    });
+    const trans = r.lines.find((l) => l.key === 'TRANSPORT')!;
+    expect(trans.detail.some((d) => d.includes('석면') && d.includes('제외'))).toBe(true);
+    // 석면 2톤이 혼합 암롤 단가로 들어가 있으면 안 된다.
+    expect(trans.detail.some((d) => d.includes('혼합·기타'))).toBe(false);
+  });
+
+  it('분리 실패로 단가가 오르면 분리 시 절감액을 함께 보여 준다', () => {
+    const r = estimateDemolitionCost({
+      wasteByClass: [{ wasteClass: 'CONCRETE', estimatedKg: 100_000, separable: false }],
+    });
+    const treat = r.lines.find((l) => l.key === 'TREATMENT')!;
+    expect(treat.detail[0]).toContain('분리하면');
+    expect(treat.detail[0]).toContain('절감');
+  });
+});

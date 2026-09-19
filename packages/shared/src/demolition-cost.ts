@@ -399,11 +399,17 @@ export function estimateDemolitionCost(input: CostEstimateInput): CostEstimate {
     const lo = w.separable || alreadyMixed ? rate.min : rate.max;
     treatMin += tons * lo;
     treatMax += tons * rate.max;
+    const escalated = lo === rate.max && rate.min < rate.max;
     treatDetail.push(
       `${WASTE_CLASS_SHORT[w.wasteClass]} ${ton1(w.estimatedKg)}톤 × ` +
         (lo === rate.max ? won(rate.max) : `${won(lo)}~${won(rate.max)}`) +
         '/톤' +
-        (rate.published ? '' : ' (공표 단가 없음 — 분리 시 업체 단가)'),
+        (rate.published ? '' : ' (공표 단가 없음 — 분리 시 업체 단가)') +
+        // 분리하면 얼마가 줄어드는지 숫자로 보여 준다 — 현장에서 실제로 바꿀 수 있는 항목이다.
+        (escalated
+          ? ` (혼합 배출 기준. 분리하면 ${won(rate.min)}/톤 — ` +
+            `${won((rate.max - rate.min) * tons)} 절감)`
+          : ''),
     );
   }
   if (treatMax > 0) {
@@ -422,12 +428,20 @@ export function estimateDemolitionCost(input: CostEstimateInput): CostEstimate {
   let transMax = 0;
   let debrisKg = 0;
   let mixedKg = 0;
+  let asbestosKg = 0;
   for (const w of input.wasteByClass) {
     if (w.estimatedKg <= 0) continue;
-    // 비중이 큰 건설폐재류만 덤프 단가를 쓴다. 나머지는 암롤(혼합) 단가.
+    // 지정폐기물(석면)의 수집·운반은 현장과 최종처리업체 거리에 따라 달라서
+    // 환경부 고시도 "수집·운반업체 견적에 의할 것" 을 권한다. 여기서 값을 만들지 않는다.
+    if (w.wasteClass === 'DESIGNATED') {
+      asbestosKg += w.estimatedKg;
+      continue;
+    }
+    // 덤프냐 암롤이냐는 **적재 비중**이 가른다(건설폐재류 1.6톤/㎥, 혼합 0.63톤/㎥).
+    // 분리배출 여부와는 무관하다 — 오염된 폐콘크리트도 콘크리트 무게로 실린다.
+    // 여기서 separable 을 보면 같은 물량의 운반비가 3배로 튄다.
     const isDebris =
-      w.separable &&
-      (w.wasteClass === 'CONCRETE' || w.wasteClass === 'ASPHALT' || w.wasteClass === 'BRICK_BLOCK');
+      w.wasteClass === 'CONCRETE' || w.wasteClass === 'ASPHALT' || w.wasteClass === 'BRICK_BLOCK';
     if (isDebris) debrisKg += w.estimatedKg;
     else mixedKg += w.estimatedKg;
   }
@@ -450,6 +464,12 @@ export function estimateDemolitionCost(input: CostEstimateInput): CostEstimate {
   }
   if (transMax > 0) {
     if (factor > 1) transDetail.push(`운반거리 ${distKm}km 보정 ×${factor.toFixed(2)}`);
+    if (asbestosKg > 0) {
+      transDetail.push(
+        `석면 ${ton1(asbestosKg)}톤의 수집·운반비는 제외 — 최종처리업체까지 거리에 따라 달라 ` +
+          '수집·운반업체 견적으로 정해야 합니다(환경부 고시 권고).',
+      );
+    }
     lines.push({
       key: 'TRANSPORT',
       label: '수집·운반비',

@@ -406,6 +406,72 @@ export class GroqSiteAnalyzer implements SiteAnalyzer {
   }
 }
 
+/**
+ * 자체 VLM(7B)용 출력 스키마. vLLM 의 guided decoding 에 넘겨 스키마를 강제한다.
+ *
+ * 왜 필요한가: 같은 프롬프트라도 7B 모델은 JSON 을 끝까지 채우지 못하고 중간에 멈춘다.
+ * 실측에서 response_format:json_object 로는 159토큰에서 끊겨 materials 가 0개였는데,
+ * 스키마를 강제하자 603토큰으로 5개를 채웠다. 호스팅 대형 모델은 이 문제가 없어
+ * 자체 VLM 경로에만 적용한다.
+ */
+const VLM_JSON_SCHEMA = {
+  type: 'object',
+  properties: {
+    summary: { type: 'string' },
+    materials: {
+      type: 'array',
+      minItems: 5,
+      maxItems: 10,
+      items: {
+        type: 'object',
+        properties: {
+          category: {
+            type: 'string',
+            enum: ['CONCRETE','STEEL','BRICK','WOOD','GLASS','GYPSUM','INSULATION','ROOFING','TILE','HAZARD','OTHER'],
+          },
+          name: { type: 'string' },
+          estimatedKg: { type: 'integer' },
+          confidence: { type: 'string', enum: ['LOW', 'MEDIUM', 'HIGH'] },
+          recyclable: { type: 'boolean' },
+          hazardous: { type: 'boolean' },
+          note: { type: 'string' },
+        },
+        required: ['category', 'name', 'estimatedKg', 'confidence', 'recyclable', 'hazardous'],
+      },
+    },
+    demolitionSteps: {
+      type: 'array',
+      minItems: 4,
+      maxItems: 7,
+      items: {
+        type: 'object',
+        properties: {
+          order: { type: 'integer' },
+          title: { type: 'string' },
+          description: { type: 'string' },
+          caution: { type: 'string' },
+        },
+        required: ['order', 'title', 'description'],
+      },
+    },
+    hazards: { type: 'array', minItems: 3, maxItems: 8, items: { type: 'string' } },
+    confidence: { type: 'string', enum: ['LOW', 'MEDIUM', 'HIGH'] },
+  },
+  required: ['summary', 'materials', 'demolitionSteps', 'hazards', 'confidence'],
+} as const;
+
+/**
+ * 소형 모델은 "구체적으로 쓰라"는 말만으로는 안 되고 좋은 예·나쁜 예를 보여줘야 따라온다.
+ * 실측: 이 지시 없이는 "콘크리트, 철, 목재", 있으면 "바닥 콘크리트 슬래브, 천장 텍스(석면 의심)".
+ */
+const VLM_SPECIFICITY_HINT = [
+  '',
+  '소재 이름은 반드시 "부위 + 자재" 형태로 구체적으로 쓰세요.',
+  '좋은 예: "천장 석고보드", "바닥 콘크리트 슬래브", "벽체 조적 벽돌", "천장 텍스(석면 의심)", "창호 유리"',
+  '나쁜 예: "콘크리트", "철", "목재" (부위가 없어 견적에 쓸 수 없습니다)',
+  '사진에서 천장·벽·바닥·창호·설비를 각각 따로 살펴 빠뜨리지 마세요.',
+].join('\n');
+
 export interface SelfHostedVlmConfig {
   /** vLLM OpenAI 호환 엔드포인트 (예: https://dimolvision-vlm-xxxx.run.app/v1). */
   baseUrl: string;
@@ -439,8 +505,12 @@ export class SelfHostedVlmAnalyzer implements SiteAnalyzer {
         },
         body: JSON.stringify({
           model: this.config.model,
-          response_format: { type: 'json_object' },
-          max_tokens: 1500,
+          // 스키마 강제 — 소형 모델이 JSON 을 끝까지 채우게 한다.
+          response_format: {
+            type: 'json_schema',
+            json_schema: { name: 'site_analysis', schema: VLM_JSON_SCHEMA },
+          },
+          max_tokens: 3000,
           temperature: 0,
           messages: [
             { role: 'system', content: SYSTEM_PROMPT },
@@ -449,7 +519,11 @@ export class SelfHostedVlmAnalyzer implements SiteAnalyzer {
               content: [
                 {
                   type: 'text',
-                  text: buildUserInstruction(input.note, input.buildingStructure, images.length, { year: input.buildingYear, use: input.buildingUse }),
+                  text:
+                    buildUserInstruction(input.note, input.buildingStructure, images.length, {
+                      year: input.buildingYear,
+                      use: input.buildingUse,
+                    }) + VLM_SPECIFICITY_HINT,
                 },
                 ...images.map((im) => ({
                   type: 'image_url' as const,

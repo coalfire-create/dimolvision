@@ -28,16 +28,17 @@ import { BuildingRegisterClient } from './public-data/building-register.js';
 function buildAnalyzerChain(mock: SiteAnalyzer): SiteAnalyzer[] {
   const { visionTimeoutMs } = env.ai;
   const chain: SiteAnalyzer[] = [];
-  if (env.ai.vlmBaseUrl) {
-    chain.push(
-      new SelfHostedVlmAnalyzer({
+
+  const selfHosted = env.ai.vlmBaseUrl
+    ? new SelfHostedVlmAnalyzer({
         baseUrl: env.ai.vlmBaseUrl,
         model: env.ai.vlmModel,
         apiKey: env.ai.vlmApiKey,
-        timeoutMs: visionTimeoutMs,
-      }),
-    );
-  }
+        timeoutMs: env.ai.vlmTimeoutMs,
+      })
+    : undefined;
+
+  if (selfHosted && env.ai.vlmPriority === 'primary') chain.push(selfHosted);
   if (env.ai.groqApiKey) {
     chain.push(
       new GroqSiteAnalyzer({
@@ -62,6 +63,10 @@ function buildAnalyzerChain(mock: SiteAnalyzer): SiteAnalyzer[] {
       }),
     );
   }
+  // 백업 자리: 호스팅이 전부 막혔을 때 받는다. 목보다는 언제나 낫다 —
+  // 목은 사진과 무관한 고정 응답이지만, 자체 VLM 은 실제로 그 사진을 본다.
+  if (selfHosted && env.ai.vlmPriority === 'fallback') chain.push(selfHosted);
+
   chain.push(mock);
   return chain;
 }

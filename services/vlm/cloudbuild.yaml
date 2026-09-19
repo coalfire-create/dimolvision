@@ -1,0 +1,16 @@
+# 모델을 바꿔가며 굽기 위한 빌드 설정. _MODEL / _IMAGE 를 치환해 쓴다.
+steps:
+  - name: gcr.io/cloud-builders/docker
+    args:
+      - build
+      - --build-arg
+      - MODEL_ID=${_MODEL}
+      - -t
+      - ${_IMAGE}
+      - .
+  - name: gcr.io/cloud-builders/docker
+    args: [push, '${_IMAGE}']
+options:
+  machineType: E2_HIGHCPU_32
+  diskSizeGb: 300
+timeout: 3600s

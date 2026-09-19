@@ -17,9 +17,19 @@ export const env = {
   ai: {
     /** 자체 호스팅 VLM(vLLM on Cloud Run GPU)의 OpenAI 호환 엔드포인트. 예: https://.../v1 */
     vlmBaseUrl: process.env.VLM_BASE_URL,
-    vlmModel: process.env.VLM_MODEL ?? 'Qwen/Qwen2.5-VL-7B-Instruct',
+    /** infra/gcp/deploy-vlm.sh 가 띄우는 served-model-name 과 반드시 같아야 한다(다르면 404). */
+    vlmModel: process.env.VLM_MODEL ?? 'Qwen/Qwen2.5-VL-7B-Instruct-AWQ',
     /** Cloud Run 을 비공개로 둘 때 쓰는 공유 토큰(선택). */
     vlmApiKey: process.env.VLM_API_KEY,
+    /**
+     * 자체 VLM 을 체인의 어디에 둘지.
+     * - 'primary'  : 맨 앞(호출당 외부 과금 0·데이터 주권). 모델 품질이 호스팅과 대등할 때.
+     * - 'fallback' : 호스팅 공급자 뒤, 목 앞. 호스팅이 레이트리밋에 걸릴 때만 받는다.
+     *   무료 티어가 막혀도 목(사진과 무관한 고정 응답)으로 떨어지지 않게 하는 안전망.
+     */
+    vlmPriority: process.env.VLM_PRIORITY === 'fallback' ? 'fallback' : 'primary',
+    /** 자체 VLM 은 호스팅 API 보다 느리다(7B 실측 24초). 전용 타임아웃을 둔다. */
+    vlmTimeoutMs: Number(process.env.VLM_TIMEOUT_MS ?? 120_000),
     groqApiKey: process.env.GROQ_API_KEY,
     groqModel: process.env.GROQ_MODEL ?? 'qwen/qwen3.8-27b',
     /**
@@ -48,9 +58,10 @@ export const env = {
 
 /** 선택된 비전 공급자 이름(로그·헬스체크용, 키 값은 노출하지 않는다). */
 export function activeVisionProvider(): 'self-hosted-vlm' | 'groq' | 'gemini' | 'claude' | 'mock' {
-  if (env.ai.vlmBaseUrl) return 'self-hosted-vlm';
+  if (env.ai.vlmBaseUrl && env.ai.vlmPriority === 'primary') return 'self-hosted-vlm';
   if (env.ai.groqApiKey) return 'groq';
   if (env.ai.geminiApiKeys.length > 0) return 'gemini';
   if (env.ai.anthropicApiKey) return 'claude';
+  if (env.ai.vlmBaseUrl) return 'self-hosted-vlm';
   return 'mock';
 }

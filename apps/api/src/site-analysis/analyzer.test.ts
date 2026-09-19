@@ -330,3 +330,43 @@ describe('건축물대장 힌트가 지시문에 반영된다', () => {
     expect(t).not.toContain('건축물대장');
   });
 });
+
+describe('SelfHostedVlmAnalyzer 출력 품질 설정', () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('스키마를 강제하고 구체적 소재명을 지시한다', async () => {
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      json: async () => ({
+        choices: [
+          {
+            message: {
+              content:
+                '{"summary":"현장","materials":[],"demolitionSteps":[],"hazards":[],"confidence":"LOW"}',
+            },
+          },
+        ],
+      }),
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await new SelfHostedVlmAnalyzer({
+      baseUrl: 'https://vlm.example/v1',
+      model: 'Qwen/Qwen2.5-VL-7B-Instruct-AWQ',
+      timeoutMs: 5000,
+    }).analyze({ imageBase64: IMG });
+
+    const body = JSON.parse(fetchMock.mock.calls[0]?.[1]?.body as string);
+    // json_object 로는 소형 모델이 스키마를 못 채운다 — 스키마 강제여야 한다.
+    expect(body.response_format.type).toBe('json_schema');
+    const schema = body.response_format.json_schema.schema;
+    expect(schema.properties.materials.minItems).toBeGreaterThanOrEqual(5);
+    expect(schema.properties.demolitionSteps.minItems).toBeGreaterThanOrEqual(4);
+    expect(schema.properties.hazards.minItems).toBeGreaterThanOrEqual(3);
+    expect(schema.required).toContain('materials');
+    // 스키마를 채우려면 1500 토큰으로는 부족하다(실측 603~645 + 여유).
+    expect(body.max_tokens).toBeGreaterThanOrEqual(3000);
+    // 부위+자재 지시가 붙어야 "콘크리트" 대신 "바닥 콘크리트 슬래브" 가 나온다.
+    expect(body.messages[1].content[0].text).toContain('부위 + 자재');
+  });
+});

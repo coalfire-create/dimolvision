@@ -25,7 +25,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import numpy as np
 
-MAX_IMAGES = 60
+MAX_IMAGES = 120
 # COLMAP 이 실패하거나 지나치게 오래 걸릴 때 요청을 붙잡고 있지 않도록.
 SFM_TIMEOUT_SEC = int(os.environ.get("SFM_TIMEOUT_SEC", "900"))
 
@@ -103,40 +103,67 @@ def robust_extent(pts: np.ndarray) -> dict:
     }
 
 
-def reconstruct(work: str) -> dict:
-    """특징점 추출 → 매칭 → 증분 SfM. 각 단계 실패를 구분해 돌려준다."""
+def reconstruct(work: str, opts: dict | None = None) -> dict:
+    """
+    특징점 추출 → 매칭 → 증분 SfM. 각 단계 실패를 구분해 돌려준다.
+
+    매칭 전략과 해상도는 요청으로 바꿀 수 있게 열어 뒀다. 어떤 조합이 현장 영상에
+    맞는지는 실측으로만 알 수 있는데, 조합마다 이미지를 새로 굽는 건 낭비다.
+    """
+    opts = opts or {}
+    matcher = opts.get("matcher") or "sequential"
+    max_edge = int(opts.get("maxImageSize") or 2000)
+    overlap = int(opts.get("overlap") or 20)
     img_dir = os.path.join(work, "images")
     db = os.path.join(work, "db.db")
     sparse = os.path.join(work, "sparse")
     os.makedirs(sparse, exist_ok=True)
     started = time.time()
 
+    # COLMAP 버전에 따라 SIFT 옵션 네임스페이스가 달라진다(3.10 부터 --SiftExtraction.* 이
+    # 인식되지 않는 빌드가 있다). CUDA 빌드는 GPU 를 기본으로 쓰므로 굳이 지정하지 않고,
+    # 버전별로 흔들리는 옵션은 붙였다가 거부되면 뺀 채로 한 번 더 시도한다.
+    extra = ["--SiftExtraction.max_image_size", str(max_edge)]
     code, log = run([
         "colmap", "feature_extractor",
         "--database_path", db, "--image_path", img_dir,
         "--ImageReader.single_camera", "1",
-        "--SiftExtraction.use_gpu", "1",
-        "--SiftExtraction.max_image_size", "1600",
+        *extra,
     ], SFM_TIMEOUT_SEC)
+    if code != 0 and "unrecognised option" in log:
+        code, log = run([
+            "colmap", "feature_extractor",
+            "--database_path", db, "--image_path", img_dir,
+            "--ImageReader.single_camera", "1",
+        ], SFM_TIMEOUT_SEC)
     if code != 0:
-        return {"ok": False, "stage": "feature_extractor", "log": log}
+        # 어떤 옵션이 유효한지 알아야 고칠 수 있다 — 도움말을 함께 싣는다.
+        _, help_log = run(["colmap", "feature_extractor", "--help"], 60)
+        return {"ok": False, "stage": "feature_extractor", "log": log, "help": help_log[:3000]}
 
-    # 영상에서 뽑은 프레임은 시간순으로 인접 프레임이 겹치므로 sequential 이 exhaustive 보다
-    # 훨씬 빠르고 매칭 품질도 비슷하다.
-    code, log = run([
-        "colmap", "sequential_matcher",
-        "--database_path", db,
-        "--SiftMatching.use_gpu", "1",
-    ], SFM_TIMEOUT_SEC)
+    # 매칭 전략. 손으로 든 카메라는 1초 사이에도 크게 움직여 인접 프레임만으로는
+    # 겹침이 모자랄 수 있다. exhaustive 는 모든 쌍을 보므로 느리지만 놓치지 않는다.
+    if matcher == "exhaustive":
+        mcmd = ["colmap", "exhaustive_matcher", "--database_path", db]
+    else:
+        mcmd = [
+            "colmap", "sequential_matcher", "--database_path", db,
+            "--SequentialMatching.overlap", str(overlap),
+        ]
+    code, log = run(mcmd, SFM_TIMEOUT_SEC)
+    if code != 0 and "unrecognised option" in log:
+        code, log = run(mcmd[:4], SFM_TIMEOUT_SEC)
     if code != 0:
-        return {"ok": False, "stage": "sequential_matcher", "log": log}
+        _, help_log = run([mcmd[1], "--help"], 60)
+        return {"ok": False, "stage": mcmd[1], "log": log, "help": help_log[:3000]}
 
     code, log = run([
         "colmap", "mapper",
         "--database_path", db, "--image_path", img_dir, "--output_path", sparse,
     ], SFM_TIMEOUT_SEC)
     if code != 0:
-        return {"ok": False, "stage": "mapper", "log": log}
+        _, help_log = run(["colmap", "mapper", "--help"], 60)
+        return {"ok": False, "stage": "mapper", "log": log, "help": help_log[:2000]}
 
     model = os.path.join(sparse, "0")
     if not os.path.isdir(model):
@@ -219,7 +246,11 @@ class Handler(BaseHTTPRequestHandler):
                     continue
                 with open(os.path.join(img_dir, f"{i:04d}.jpg"), "wb") as f:
                     f.write(data)
-            self._json(200, reconstruct(work))
+            self._json(200, reconstruct(work, {
+                "matcher": payload.get("matcher"),
+                "maxImageSize": payload.get("maxImageSize"),
+                "overlap": payload.get("overlap"),
+            }))
         except Exception as e:  # noqa: BLE001
             self._json(500, {"ok": False, "stage": "server", "log": str(e)[:500]})
         finally:

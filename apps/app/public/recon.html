@@ -52,6 +52,13 @@
       .stat { background: #fff; border: 1px solid var(--border); border-radius: 10px; padding: 10px; text-align: center; }
       .stat b { display: block; font-size: 18px; margin-top: 2px; }
       .stat span { font-size: 11px; color: var(--muted); }
+      .guide { background: #fff; border: 1px solid var(--border); border-radius: 12px; padding: 14px 16px; margin-bottom: 12px; }
+      .gtitle { margin: 0 0 6px; font-size: 15px; font-weight: 800; color: var(--primary); }
+      .gbody { margin: 0 0 10px; font-size: 13px; color: var(--muted); line-height: 1.6; }
+      .gl { margin: 0; padding-left: 18px; font-size: 13px; line-height: 1.75; }
+      .gl li { margin-bottom: 2px; }
+      .gwarn { margin: 10px 0 0; padding: 9px 11px; background: var(--warnbg); border: 1px solid var(--warnbd);
+               border-radius: 8px; font-size: 12px; color: #78350f; }
       .note { background: var(--warnbg); border: 1px solid var(--warnbd); border-radius: 10px; padding: 12px 14px; font-size: 13px; color: #78350f; margin-top: 12px; }
       .err { background: #fef2f2; border: 1px solid #fecaca; color: #7f1d1d; border-radius: 10px; padding: 12px 14px; font-size: 13px; margin-top: 12px; }
       .hidden { display: none !important; }
@@ -70,10 +77,25 @@
 
       <div class="card">
         <h2>1. 현장 영상</h2>
-        <p class="sub">
-          20~60초. 벽에서 2~3m 떨어져 <b>천천히</b> 이동하며, 화면이 이전 위치와 절반 이상
-          겹치도록 촬영하세요. 빠르게 돌리면 복원이 실패합니다.
-        </p>
+        <div class="guide">
+          <p class="gtitle">제자리에서 돌리지 말고, <u>걸어서 이동</u>하며 찍으세요</p>
+          <p class="gbody">
+            3D 복원은 <b>같은 지점을 서로 다른 위치에서 본 차이(시차)</b>로 깊이를 계산합니다.
+            한자리에 서서 카메라만 돌리면 시차가 생기지 않아 수학적으로 복원이 불가능합니다.
+          </p>
+          <ul class="gl">
+            <li><b>옆으로 이동</b> — 벽을 따라 게걸음처럼 걸으며 촬영합니다</li>
+            <li><b>한 바퀴 돌기</b> — 방이면 벽을 따라, 건물이면 외곽을 따라 크게 돕니다</li>
+            <li><b>2~3m 거리 유지</b> — 너무 가까우면 화면이 급변해 이어지지 않습니다</li>
+            <li><b>천천히</b> — 30~60초. 빠르게 훑으면 흔들려 특징점이 사라집니다</li>
+            <li><b>무늬 있는 곳을 포함</b> — 민무늬 벽만 찍으면 맞출 기준점이 없습니다.
+              가구·배관·바닥 패턴·창틀이 화면에 들어오게 하세요</li>
+          </ul>
+          <p class="gwarn">
+            실측: 제자리 회전이 섞인 영상은 112장을 넣어도 27장만 복원됐습니다.
+            나머지는 시차가 없어 버려집니다.
+          </p>
+        </div>
         <label class="file" for="file">
           영상 선택 또는 촬영
           <span id="fileName">아직 선택하지 않았습니다</span>
@@ -127,7 +149,12 @@
       // ── 프레임 추출 ─────────────────────────────────────────────────
       // 서버로 영상을 통째로 보내면 수십 MB 전송 + 서버 ffmpeg 이 필요하다.
       // 브라우저는 video 를 원하는 시각으로 옮겨 그릴 수 있으니 여기서 뽑아 보낸다.
-      const SAMPLE = 48, KEEP = 28, MAX_EDGE = 1280;
+      // 실측 근거(현장 영상 33초):
+//   28장·sequential·2000px → 정합 4/28 · 점 125    (사실상 실패)
+//   60장·exhaustive·1600px → 정합 27/60 · 점 2,194 (17배)
+//   112장·exhaustive       → 정합 27/112 · 점 2,161 (더 넣어도 같은 27장만 붙음)
+// 60장 근처가 정확도 대비 시간이 가장 낫다. 그 이상은 복원 안 되는 프레임만 늘린다.
+const SAMPLE = 72, KEEP = 60, MAX_EDGE = 1600;
 
       function sharpness(data, w, h) {
         // 라플라시안 응답의 분산 — 흔들린 프레임은 고주파가 사라져 값이 급락한다.
@@ -143,15 +170,6 @@
         return n ? sq / n - (s / n) ** 2 : 0;
       }
 
-      function seek(v, t) {
-        return new Promise((res, rej) => {
-          const ok = () => { v.removeEventListener('seeked', ok); res(); };
-          v.addEventListener('seeked', ok);
-          v.addEventListener('error', () => rej(new Error('영상 탐색 실패')), { once: true });
-          v.currentTime = Math.max(0, t);
-        });
-      }
-
       // 선명도만 보면 한 구간에 몰려 삼각측량이 안 된다. 구간을 나눠 각 구간의 최선을 뽑는다.
       function pickSpread(frames, keep) {
         if (frames.length <= keep) return frames;
@@ -163,6 +181,45 @@
           out.push(best);
         }
         return out;
+      }
+
+      // 탐색(currentTime 설정)은 소스에 따라 아예 동작하지 않는다 — Range 요청을 지원하지
+      // 않는 서버나 일부 코덱에서 currentTime 이 0 에 머문다. 실측에서 30초를 요청해도
+      // 계속 0초 프레임만 나왔다. 그래서 **재생하며 잡는다**:
+      // requestVideoFrameCallback 은 새 프레임이 실제로 렌더될 때마다 불려 확실하다.
+      function captureWhilePlaying(v, cv, ctx, w, h, want, onProgress) {
+        return new Promise((resolve, reject) => {
+          const frames = [];
+          let lastT = -1;
+          // 목표 장수를 영상 길이에 고르게 배분한 간격.
+          const minGap = Math.max(0.05, (v.duration || 30) / (want * 1.4));
+          const finish = () => { try { v.pause(); } catch {} resolve(frames); };
+          if (typeof v.requestVideoFrameCallback !== 'function') {
+            reject(new Error('이 브라우저는 영상 프레임 추출을 지원하지 않습니다.'));
+            return;
+          }
+          const step = () => {
+            // 영상 전체를 고르게 덮어야 복원이 된다. 앞부분만 채우고 멈추면
+            // 카메라가 움직인 범위를 덮지 못해 삼각측량이 성립하지 않는다.
+            // 그래서 목표 장수로 끊지 않고 끝까지 훑되, 최소 간격을 둬 과수집을 막는다.
+            if (v.currentTime > lastT + minGap) {
+              lastT = v.currentTime;
+              ctx.drawImage(v, 0, 0, w, h);
+              const img = ctx.getImageData(0, 0, w, h);
+              const b64 = cv.toDataURL('image/jpeg', 0.82).split(',')[1];
+              if (b64) frames.push({ base64: b64, timeSec: v.currentTime, sharpness: sharpness(img.data, w, h) });
+              onProgress(frames.length, want);
+            }
+            if (v.ended) { finish(); return; }
+            v.requestVideoFrameCallback(step);
+          };
+          v.addEventListener('ended', finish, { once: true });
+          v.addEventListener('error', () => reject(new Error('영상 재생 중 오류가 발생했습니다.')), { once: true });
+          v.requestVideoFrameCallback(step);
+          v.play().catch(() => reject(new Error('영상을 재생하지 못했습니다.')));
+          // 안전장치 — 아주 긴 영상에서 무한정 기다리지 않는다.
+          setTimeout(finish, 120000);
+        });
       }
 
       async function extractFrames(file, onProgress) {
@@ -181,17 +238,14 @@
           const cv = document.createElement('canvas');
           cv.width = w; cv.height = h;
           const ctx = cv.getContext('2d', { willReadFrequently: true });
-          const frames = [];
-          const a = dur * 0.03, b = dur * 0.97;  // 처음·끝은 손떨림 구간
-          for (let i = 0; i < SAMPLE; i++) {
-            await seek(v, a + ((b - a) * i) / (SAMPLE - 1));
-            ctx.drawImage(v, 0, 0, w, h);
-            const img = ctx.getImageData(0, 0, w, h);
-            const b64 = cv.toDataURL('image/jpeg', 0.82).split(',')[1];
-            if (b64) frames.push({ base64: b64, sharpness: sharpness(img.data, w, h) });
-            onProgress(i + 1, SAMPLE);
+
+          // 배속 재생으로 훑는다. 너무 빠르면 프레임 콜백을 건너뛰므로 3배 정도가 안전하다.
+          v.playbackRate = Math.min(3, Math.max(1, dur / 12));
+          const frames = await captureWhilePlaying(v, cv, ctx, w, h, SAMPLE, onProgress);
+          if (frames.length < 8) {
+            throw new Error(`프레임을 ${frames.length}장만 얻었습니다. 영상이 너무 짧거나 재생되지 않았습니다.`);
           }
-          return pickSpread(frames, KEEP);
+          return pickSpread(frames, Math.min(KEEP, frames.length));
         } finally {
           URL.revokeObjectURL(url); v.removeAttribute('src'); v.load();
         }
@@ -309,7 +363,9 @@
           setStage(`${frames.length}장으로 3D 복원 중… 수 분 걸립니다`, 45);
           const axis = $('axis').value;
           const meters = parseFloat($('meters').value);
-          const body = { frames: frames.map(f => f.base64) };
+          // exhaustive 는 모든 쌍을 비교한다. 손으로 든 촬영은 인접 프레임 겹침이
+          // 들쭉날쭉해 sequential 로는 놓치는 쌍이 많았다(실측 4/28 → 27/60).
+          const body = { frames: frames.map(f => f.base64), matcher: 'exhaustive', maxImageSize: 1600 };
           if (axis && isFinite(meters) && meters > 0) body.scaleReference = { axis, realMeters: meters };
 
           const res = await fetch('/api/recon/reconstruct', {

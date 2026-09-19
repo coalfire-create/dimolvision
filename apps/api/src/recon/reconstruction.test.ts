@@ -47,20 +47,24 @@ describe('reconQuality — 결과를 믿어도 되는지', () => {
     extent, cameraPathLength: 5, points: [], cameras: [], elapsedSec: 10,
   });
 
-  it('대부분 등록되고 점이 많으면 GOOD', () => {
-    expect(reconQuality(mk(28, 30, 5000)).level).toBe('GOOD');
+  it('대부분 등록되고 점이 충분하면 GOOD', () => {
+    expect(reconQuality(mk(28, 30, 12000)).level).toBe('GOOD');
   });
 
-  it('절반쯤 등록되면 FAIR 이고 보완 촬영을 안내한다', () => {
-    const q = reconQuality(mk(18, 30, 1200));
+  it('실측 성공 사례(27/60 · 2194점)는 FAIR — 쓸 수 있는 결과다', () => {
+    const q = reconQuality(mk(27, 60, 2194));
     expect(q.level).toBe('FAIR');
-    expect(q.advice).toContain('다시 촬영');
+    expect(q.advice).toContain('제자리');
   });
 
-  it('등록률이 낮으면 POOR 이고 실패 원인을 알려준다', () => {
-    const q = reconQuality(mk(5, 30, 100));
+  it('실측 실패 사례(4/28 · 125점)는 POOR', () => {
+    const q = reconQuality(mk(4, 28, 125));
     expect(q.level).toBe('POOR');
-    expect(q.advice).toMatch(/무늬|조명|겹치게/);
+    expect(q.advice).toMatch(/제자리|이동/);
+  });
+
+  it('정합률이 낮아도 점이 충분하면 FAIR — 제자리 회전 구간이 비율을 깎을 뿐이다', () => {
+    expect(reconQuality(mk(27, 112, 2161)).level).toBe('FAIR');
   });
 
   it('한 장도 등록 못 하면 POOR', () => {
@@ -85,7 +89,9 @@ describe('ReconstructionClient', () => {
     vi.stubGlobal('fetch', f);
     await client().reconstruct(Array(100).fill('x'));
     const body = JSON.parse(f.mock.calls[0]?.[1]?.body as string);
-    expect(body.frames.length).toBeLessThanOrEqual(40);
+    expect(body.frames.length).toBeLessThanOrEqual(64);
+    // 손 촬영은 인접 프레임 겹침이 들쭉날쭉해 sequential 로는 쌍을 놓친다(실측 4/28 → 27/60).
+    expect(body.matcher).toBe('exhaustive');
   });
 
   it('서버 오류는 단계와 함께 실패로 돌려준다 — 분석을 막지 않는다', async () => {

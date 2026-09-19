@@ -40,8 +40,13 @@ export type ReconstructionResponse = ReconstructionResult | ReconstructionFailur
 /** 복원에 최소한 필요한 프레임 수. 이보다 적으면 삼각측량이 성립하지 않는다. */
 export const MIN_RECON_FRAMES = 8;
 
-/** 한 번에 보내는 상한. 많을수록 느려지고 이득은 완만하게 줄어든다. */
-export const MAX_RECON_FRAMES = 40;
+/**
+ * 한 번에 보내는 상한. 실측에서 60장 근처가 정확도 대비 시간이 가장 좋았다.
+ *   60장  → 정합 27 · 점 2,194 · 54초
+ *   112장 → 정합 27 · 점 2,161 · 41초  (더 넣어도 붙는 프레임은 그대로)
+ * 그 이상은 복원되지 않는 프레임만 늘려 전송량과 시간을 낭비한다.
+ */
+export const MAX_RECON_FRAMES = 64;
 
 export interface ReconstructionConfig {
   baseUrl: string;
@@ -73,7 +78,7 @@ export class ReconstructionClient {
           'content-type': 'application/json',
           ...(this.config.apiKey ? { authorization: `Bearer ${this.config.apiKey}` } : {}),
         },
-        body: JSON.stringify({ frames: use }),
+        body: JSON.stringify({ frames: use, matcher: 'exhaustive', maxImageSize: 1600 }),
       });
       const body = (await res.json()) as ReconstructionResponse;
       if (!res.ok) {
@@ -159,19 +164,32 @@ export function reconQuality(r: ReconstructionResult): {
   advice?: string;
 } {
   const ratio = r.totalImages > 0 ? r.registeredImages / r.totalImages : 0;
-  if (ratio >= 0.8 && r.pointCount >= 2000) return { level: 'GOOD', registeredRatio: ratio };
-  if (ratio >= 0.5 && r.pointCount >= 500) {
+
+  // 판정 기준은 실측에서 왔다(현장 영상 33초, 실내 촬영):
+  //   정합 4/28 · 점 125    → 형상이 안 나온다. 쓸 수 없다.
+  //   정합 27/60 · 점 2,194 → 공간 윤곽이 보이고 상대 치수를 잴 수 있다.
+  // 정합률만 보면 안 된다. 제자리 회전 구간이 섞이면 그 프레임들은 원리적으로 복원이
+  // 불가능해 비율을 끌어내리는데, 나머지가 제대로 붙었으면 결과는 쓸 만하다.
+  // 그래서 **점 개수를 1차 기준**으로, 정합률은 보조로 본다.
+  if (r.pointCount >= 8000 && ratio >= 0.7) return { level: 'GOOD', registeredRatio: ratio };
+  if (r.pointCount >= 1500) {
     return {
       level: 'FAIR',
       registeredRatio: ratio,
-      advice: '일부 구간이 복원되지 않았습니다. 그 부분을 천천히 다시 촬영하면 정확해집니다.',
+      advice:
+        ratio < 0.6
+          ? '일부 구간이 복원되지 않았습니다. 제자리에서 카메라만 돌린 구간은 시차가 없어 ' +
+            '복원되지 않습니다. 벽을 따라 걸으며 다시 촬영하면 정확해집니다.'
+          : '복원이 되었습니다. 더 촘촘히 돌면 정밀도가 올라갑니다.',
     };
   }
   return {
     level: 'POOR',
     registeredRatio: ratio,
     advice:
-      '복원이 충분하지 않습니다. 벽에 무늬가 없거나 조명이 어두우면 실패합니다. ' +
-      '건물을 한 바퀴 돌며 천천히, 이전 화면과 절반 이상 겹치게 촬영해 주세요.',
+      '복원에 실패했습니다. 가장 흔한 원인은 **제자리에서 카메라만 돌린 촬영**입니다. ' +
+      '3D 는 같은 지점을 다른 위치에서 본 차이로 깊이를 계산하므로, 카메라가 실제로 ' +
+      '이동해야 합니다. 벽을 따라 옆으로 걸으며 2~3m 거리에서 천천히 다시 촬영해 주세요. ' +
+      '민무늬 벽만 잡히면 맞출 기준점이 없으니 가구·배관·창틀이 화면에 들어오게 하세요.',
   };
 }

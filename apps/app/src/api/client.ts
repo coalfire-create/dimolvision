@@ -55,10 +55,29 @@ export const analyzeSite = (input: {
   /** 건축물대장 사용승인 연도 — 2009년 석면 금지 이전이면 석면 의심을 가중한다. */
   buildingYear?: number;
   buildingUse?: string;
+  /**
+   * 건축물대장 조회용 주소 코드. 함께 보내면 서버가 대장을 조회해
+   * 주구조·연면적·층수·사용승인연도·주용도를 자동으로 힌트에 채운다.
+   */
+  sigunguCd?: string;
+  bjdongCd?: string;
+  bun?: string;
+  ji?: string;
 }) => api<SiteAnalysis>('/site-analysis/analyze', { method: 'POST', body: JSON.stringify(input) });
+
+/** 건축물대장 조회 결과(주소 코드를 보냈을 때만 온다). */
+export interface BuildingRegisterInfo {
+  structureName?: string;
+  totalFloorAreaM2?: number;
+  floorsAbove?: number;
+  approvedYear?: number;
+  mainUse?: string;
+  buildingName?: string;
+}
 
 export interface PhotoWasteItemsResult {
   analysis: SiteAnalysis;
+  buildingRegister?: BuildingRegisterInfo;
   wasteItems: WasteItem[];
   /** 연면적을 함께 보냈을 때만 온다 — 추정 톤수·범위·트럭 대수. */
   estimate?: VolumeEstimate;
@@ -74,6 +93,14 @@ export const analyzeSiteWasteItems = (input: {
   buildingStructure?: string;
   buildingYear?: number;
   buildingUse?: string;
+  /**
+   * 건축물대장 조회용 주소 코드. 함께 보내면 서버가 대장을 조회해
+   * 주구조·연면적·층수·사용승인연도·주용도를 자동으로 힌트에 채운다.
+   */
+  sigunguCd?: string;
+  bjdongCd?: string;
+  bun?: string;
+  ji?: string;
 }) =>
   api<PhotoWasteItemsResult>('/site-analysis/waste-items', {
     method: 'POST',

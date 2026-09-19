@@ -8,6 +8,7 @@ import {
   estimateDemolitionCost,
   formatWonShort,
   matchEquipment,
+  matchEquipmentAll,
 } from './demolition-cost.js';
 
 describe('matchEquipment', () => {
@@ -19,9 +20,11 @@ describe('matchEquipment', () => {
     expect(matchEquipment('굴착기', '1.0㎥ 대형')).toBe('EXCAVATOR_10');
   });
 
-  it('부착장비를 굴착기로 오인하지 않는다', () => {
-    expect(matchEquipment('압쇄기', '굴착기 부착용')).toBe('PULVERIZER_10');
-    expect(matchEquipment('대형브레이커')).toBe('BREAKER_07');
+  it('부착장비가 적히면 그걸 달 굴착기를 먼저 센다', () => {
+    // 압쇄기·브레이커는 혼자 움직이지 못한다. 단일 선택은 모기계를 돌려주고,
+    // 부착장비까지 필요한 쪽은 matchEquipmentAll 을 쓴다.
+    expect(matchEquipment('압쇄기', '굴착기 부착용')).toBe('EXCAVATOR_06');
+    expect(matchEquipment('대형브레이커')).toBe('EXCAVATOR_06');
   });
 
   it('규격이 없으면 소규모 철거의 표준 장비로 본다', () => {
@@ -154,5 +157,31 @@ describe('formatWonShort', () => {
     expect(formatWonShort(8_500)).toBe('8,500원');
     expect(formatWonShort(12_340_000)).toBe('1,234만원');
     expect(formatWonShort(250_000_000)).toBe('2.5억원');
+  });
+});
+
+describe('matchEquipmentAll', () => {
+  it('한 줄에 적힌 모기계와 부착장비를 모두 잡는다', () => {
+    // 모델은 "중형 굴착기(압쇄기 부착)" 처럼 한 줄에 둘을 쓴다.
+    // 압쇄기만 잡으면 그걸 달고 있는 굴착기가 통째로 빠져 장비비가 4분의 1이 된다.
+    expect(matchEquipmentAll('중형 굴착기', '06W 급 압쇄기 부착')).toEqual([
+      'EXCAVATOR_06',
+      'PULVERIZER_10',
+    ]);
+  });
+
+  it('부착장비만 적혀도 그걸 달 굴착기를 함께 센다', () => {
+    expect(matchEquipmentAll('압쇄기')).toEqual(['EXCAVATOR_06', 'PULVERIZER_10']);
+    expect(matchEquipmentAll('대형브레이커')).toEqual(['EXCAVATOR_06', 'BREAKER_07']);
+  });
+
+  it('규격 숫자가 없으면 크기 낱말로 등급을 잡는다', () => {
+    expect(matchEquipmentAll('소형 굴착기 (스키드 로더)')).toEqual(['EXCAVATOR_02']);
+    expect(matchEquipmentAll('대형 굴착기')).toEqual(['EXCAVATOR_10']);
+  });
+
+  it('철거 장비가 아니면 아무것도 세지 않는다', () => {
+    expect(matchEquipmentAll('고소작업대', '15~20m 급 유압식')).toEqual([]);
+    expect(matchEquipmentAll('살수차')).toEqual([]);
   });
 });

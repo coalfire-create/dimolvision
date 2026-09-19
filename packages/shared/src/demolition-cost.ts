@@ -228,20 +228,47 @@ export function equipmentDailyWon(rate: EquipmentRate): number {
  * 어디에도 걸리지 않으면 undefined — 값을 지어내느니 금액에서 빼는 편이 낫다.
  */
 export function matchEquipment(name: string, spec?: string): EquipmentCode | undefined {
+  return matchEquipmentAll(name, spec)[0];
+}
+
+/**
+ * 한 줄에 여러 장비가 적힌 경우를 모두 잡는다.
+ *
+ * 모델은 "중형 굴착기(압쇄기 부착)" 처럼 **모기계와 부착장비를 한 줄에** 쓴다. 이걸
+ * 하나만 고르면 압쇄기만 잡고 그걸 달고 있는 굴착기를 통째로 빠뜨려 장비비가 실제의
+ * 4분의 1이 된다(압쇄기 15만/일, 굴착기 65만/일). 부착장비는 혼자 움직이지 못한다.
+ */
+export function matchEquipmentAll(name: string, spec?: string): EquipmentCode[] {
   const text = `${name} ${spec ?? ''}`.toLowerCase();
-  if (/압쇄|펄버|크러셔|crusher/.test(text)) return 'PULVERIZER_10';
-  if (/브레이커|breaker|함마|햄머|하버/.test(text)) return 'BREAKER_07';
+  const out: EquipmentCode[] = [];
+
+  const carrier = matchExcavator(text);
+  if (carrier) out.push(carrier);
+  if (/압쇄|펄버|크러셔|crusher/.test(text)) out.push('PULVERIZER_10');
+  if (/브레이커|breaker|함마|햄머/.test(text)) out.push('BREAKER_07');
+
+  // 부착장비만 적혀 있어도 그걸 달 굴착기가 반드시 있어야 한다.
+  if (out.length > 0 && !out.some((c) => c.startsWith('EXCAVATOR'))) out.unshift('EXCAVATOR_06');
+  return out;
+}
+
+/** 굴착기 등급 판정. 규격 숫자가 없으면 크기 낱말(소형·중형·대형)로 본다. */
+function matchExcavator(text: string): EquipmentCode | undefined {
   if (!/굴착기|굴삭기|포크레인|excavator|백호/.test(text)) return undefined;
 
-  // 규격 표기가 여러 갈래다: 0.6㎥ / 06W / 6W / 060. 숫자만 뽑아 가장 가까운 등급으로.
+  // 규격 표기가 여러 갈래다: 0.6㎥ / 06W / 6W. 숫자를 먼저 본다.
   const m3 = text.match(/(\d+(?:\.\d+)?)\s*(?:㎥|m3|루베)/);
   const wClass = text.match(/\b0?(\d)\s*w\b/);
   const bucket = m3 ? Number(m3[1]) : wClass ? Number(wClass[1]) / 10 : undefined;
-  if (bucket === undefined) return 'EXCAVATOR_06'; // 소규모 철거의 표준 장비
-  if (bucket <= 0.25) return 'EXCAVATOR_02';
-  if (bucket <= 0.45) return 'EXCAVATOR_04';
-  if (bucket <= 0.75) return 'EXCAVATOR_06';
-  return 'EXCAVATOR_10';
+  if (bucket !== undefined) {
+    if (bucket <= 0.25) return 'EXCAVATOR_02';
+    if (bucket <= 0.45) return 'EXCAVATOR_04';
+    if (bucket <= 0.75) return 'EXCAVATOR_06';
+    return 'EXCAVATOR_10';
+  }
+  if (/미니|소형|스키드|skid|mini/.test(text)) return 'EXCAVATOR_02';
+  if (/대형|large/.test(text)) return 'EXCAVATOR_10';
+  return 'EXCAVATOR_06'; // 소규모 철거의 표준 장비
 }
 
 /**
@@ -460,16 +487,17 @@ export function estimateDemolitionCost(input: CostEstimateInput): CostEstimate {
   const equipDetail: string[] = [];
   const seen = new Set<EquipmentCode>();
   for (const e of input.equipment ?? []) {
-    const code = matchEquipment(e.name, e.spec);
-    if (!code || seen.has(code)) continue;
-    seen.add(code);
-    const rate = EQUIPMENT_RATES[code]!;
-    const daily = equipmentDailyWon(rate);
-    equipDaily += daily;
-    equipDetail.push(
-      `${rate.label} ${rate.spec} ${won(daily)}/일` +
-        (rate.operator ? ' (손료·연료·잡재료+조종원)' : ' (부착장비, 손료)'),
-    );
+    for (const code of matchEquipmentAll(e.name, e.spec)) {
+      if (seen.has(code)) continue;
+      seen.add(code);
+      const rate = EQUIPMENT_RATES[code]!;
+      const daily = equipmentDailyWon(rate);
+      equipDaily += daily;
+      equipDetail.push(
+        `${rate.label} ${rate.spec} ${won(daily)}/일` +
+          (rate.operator ? ' (손료·연료·잡재료+조종원)' : ' (부착장비, 손료)'),
+      );
+    }
   }
   if (equipDaily > 0 && days > 0) {
     // 장비는 공기 내내 붙어 있지 않다. 하한은 공기의 60%, 상한은 전 기간으로 본다.

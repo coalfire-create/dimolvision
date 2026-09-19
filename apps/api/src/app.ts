@@ -13,6 +13,7 @@ import { createSiteAnalysisRouter } from './routes/site-analysis.js';
 import { env, activeVisionProvider } from './config/env.js';
 import { BuildingRegisterClient } from './public-data/building-register.js';
 import { createAnalysisCache, type AnalysisCacheStore } from './cache/analysis-cache.js';
+import { ReconstructionClient } from './recon/reconstruction.js';
 
 /**
  * 디몰비전 API(경량형) — 현장 사진 → 소재/공정/위험 분석 + 물량 추정.
@@ -86,6 +87,7 @@ export function createApp() {
       ok: true,
       provider: activeVisionProvider(),
       publicData: { buildingRegister: Boolean(env.publicData.serviceKey) },
+      recon: Boolean(env.recon.baseUrl),
     });
   });
 
@@ -114,9 +116,18 @@ export function createApp() {
     },
   };
 
+  // 3D 복원은 GPU 서비스가 설정됐을 때만 켠다(없으면 엔드포인트가 503 을 낸다).
+  const recon = env.recon.baseUrl
+    ? new ReconstructionClient({
+        baseUrl: env.recon.baseUrl,
+        timeoutMs: env.recon.timeoutMs,
+        apiKey: env.recon.apiKey,
+      })
+    : undefined;
+
   app.use(
     '/api',
-    createSiteAnalysisRouter(chain, new HeuristicVolumeEstimator(), { cache }, registry),
+    createSiteAnalysisRouter(chain, new HeuristicVolumeEstimator(), { cache, recon }, registry),
   );
 
   return app;

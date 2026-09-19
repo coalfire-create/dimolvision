@@ -9,6 +9,12 @@ import {
 import type { VolumeEstimator } from '../estimation/provider.js';
 import type { BuildingRegisterClient } from '../public-data/building-register.js';
 import {
+  reconQuality,
+  scaleDimensions,
+  type ReconstructionClient,
+  type ScaleReference,
+} from '../recon/reconstruction.js';
+import {
   ANALYSIS_CACHE_TTL_SECONDS,
   analysisCacheKey,
   isCacheable,
@@ -39,6 +45,8 @@ export interface SiteAnalysisRouterOptions {
    * 외부 API 호출을 없애 무료 티어 한도에 걸리지 않게 한다.
    */
   cache?: AnalysisCacheStore;
+  /** 3D 복원 클라이언트(선택). 없으면 복원 엔드포인트가 503 을 낸다. */
+  recon?: ReconstructionClient;
   /** 공급자 1곳당 시도 횟수(1 = 재시도 없음). 기본 2 — 일시적 429/503 을 한 번 더 받아준다. */
   attemptsPerAnalyzer?: number;
   /** 재시도 전 대기(ms). 기본 700. */
@@ -55,6 +63,7 @@ export function createSiteAnalysisRouter(
   const attempts = Math.max(1, options.attemptsPerAnalyzer ?? 2);
   const retryDelayMs = options.retryDelayMs ?? 700;
   const cache = options.cache;
+  const recon = options.recon;
   const router = Router();
 
   function parseInput(body: Record<string, unknown>): AnalyzeSiteInput {
@@ -263,5 +272,55 @@ export function createSiteAnalysisRouter(
     }
   });
 
+  /**
+   * POST /api/recon/reconstruct
+   *   { frames: string[], scaleReference?: { axis, realMeters } }
+   *
+   * 영상에서 뽑은 프레임으로 3D 복원을 수행한다. 복원 좌표계는 단위가 없으므로,
+   * 기준 길이를 함께 주면 실제 치수(㎡·㎥)까지 환산해 돌려준다. 기준이 없으면
+   * 형상과 상대 치수만 준다 — 근거 없이 미터를 붙이지 않는다.
+   */
+  router.post('/recon/reconstruct', async (req, res) => {
+    if (!recon) {
+      res.status(503).json({
+        ok: false,
+        stage: 'disabled',
+        log: '3D 복원 서비스가 설정되지 않았습니다(RECON_BASE_URL).',
+      });
+      return;
+    }
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    const frames = Array.isArray(body.frames)
+      ? body.frames.filter((f): f is string => typeof f === 'string' && f.length > 100)
+      : [];
+
+    const result = await recon.reconstruct(frames);
+    if (!result.ok) {
+      res.status(200).json(result);
+      return;
+    }
+
+    const quality = reconQuality(result);
+    const ref = parseScaleReference(body.scaleReference);
+    const dimensions = ref ? scaleDimensions(result.extent, ref) : undefined;
+
+    res.json({
+      ...result,
+      quality,
+      ...(dimensions ? { dimensions } : {}),
+    });
+  });
+
   return router;
+}
+
+/** 기준 길이 입력 파싱. 축 이름과 양수 길이가 모두 있어야 인정한다. */
+function parseScaleReference(raw: unknown): ScaleReference | undefined {
+  if (typeof raw !== 'object' || raw === null) return undefined;
+  const r = raw as Record<string, unknown>;
+  const axis = r.axis;
+  if (axis !== 'x' && axis !== 'y' && axis !== 'z' && axis !== 'diagonal') return undefined;
+  const meters = r.realMeters;
+  if (typeof meters !== 'number' || !Number.isFinite(meters) || meters <= 0) return undefined;
+  return { axis, realMeters: meters };
 }

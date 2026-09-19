@@ -47,6 +47,15 @@ export const env = {
     visionTimeoutMs: Number(process.env.VISION_TIMEOUT_MS ?? 30_000),
   },
   /**
+   * 3D 복원 서비스(Cloud Run GPU 위의 COLMAP). 없으면 복원 기능이 꺼진다.
+   * COLMAP 은 수 분이 걸리므로 비전 분석과 타임아웃을 공유하지 않는다.
+   */
+  recon: {
+    baseUrl: process.env.RECON_BASE_URL,
+    timeoutMs: Number(process.env.RECON_TIMEOUT_MS ?? 600_000),
+    apiKey: process.env.RECON_API_KEY,
+  },
+  /**
    * 공공데이터포털 인증키(건축물대장). 없으면 공공데이터 보강 없이 사진만으로 분석한다.
    * 발급: https://www.data.go.kr → '건축물대장정보 서비스' 활용신청 → 일반 인증키(Decoding)
    */

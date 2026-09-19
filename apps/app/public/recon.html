@@ -1,0 +1,362 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>3D 현장 복원 — 디몰비전</title>
+    <link rel="icon" href="/favicon.ico" />
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #ffffff; --card: #f6f7f9; --text: #1a1a1a; --muted: #595959;
+        --border: #dce3f0; --primary: #2c55e9; --soft: #eaeffd;
+        --warn: #b45309; --warnbg: #fffbeb; --warnbd: #fde68a; --err: #c62828;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0; background: var(--bg); color: var(--text); line-height: 1.6;
+        font-family: -apple-system, BlinkMacSystemFont, 'Apple SD Gothic Neo', 'Pretendard',
+          'Malgun Gothic', system-ui, sans-serif;
+        -webkit-text-size-adjust: 100%;
+      }
+      .wrap { max-width: 760px; margin: 0 auto; padding-block: 28px; padding-left: 16px; padding-right: 16px; }
+      header { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; }
+      h1 { font-size: 20px; margin: 0; letter-spacing: -0.01em; }
+      .lead { color: var(--muted); font-size: 14px; margin: 0 0 20px; }
+      .card { background: var(--card); border: 1px solid var(--border); border-radius: 14px; padding: 16px; margin-bottom: 14px; }
+      .card h2 { font-size: 15px; margin: 0 0 4px; }
+      .card p.sub { color: var(--muted); font-size: 13px; margin: 0 0 12px; }
+      label.file {
+        display: block; border: 2px dashed #cbd5e1; border-radius: 12px; padding: 22px 16px;
+        text-align: center; cursor: pointer; background: #fff; font-weight: 700; font-size: 15px;
+      }
+      label.file span { display: block; color: var(--muted); font-weight: 400; font-size: 13px; margin-top: 4px; }
+      input[type=file] { display: none; }
+      .row { display: flex; gap: 10px; align-items: flex-end; flex-wrap: wrap; }
+      .field { flex: 1; min-width: 130px; }
+      .field label { display: block; font-size: 12px; font-weight: 700; margin-bottom: 5px; }
+      select, input[type=number] {
+        width: 100%; padding: 11px 10px; border: 1.5px solid var(--border);
+        border-radius: 10px; font-size: 15px; background: #fff; color: var(--text);
+      }
+      button {
+        width: 100%; padding: 15px; border: 0; border-radius: 12px; background: var(--primary);
+        color: #fff; font-size: 16px; font-weight: 800; cursor: pointer; margin-top: 12px;
+      }
+      button:disabled { background: #a8b6e8; cursor: default; }
+      #stage { font-size: 13px; color: var(--muted); margin-top: 10px; min-height: 20px; }
+      .bar { height: 6px; background: var(--border); border-radius: 3px; overflow: hidden; margin-top: 8px; }
+      .bar i { display: block; height: 100%; width: 0; background: var(--primary); transition: width .25s; }
+      #viewer { width: 100%; aspect-ratio: 4/3; background: #0f172a; border-radius: 12px; overflow: hidden; touch-action: none; }
+      .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(105px, 1fr)); gap: 8px; margin-top: 12px; }
+      .stat { background: #fff; border: 1px solid var(--border); border-radius: 10px; padding: 10px; text-align: center; }
+      .stat b { display: block; font-size: 18px; margin-top: 2px; }
+      .stat span { font-size: 11px; color: var(--muted); }
+      .note { background: var(--warnbg); border: 1px solid var(--warnbd); border-radius: 10px; padding: 12px 14px; font-size: 13px; color: #78350f; margin-top: 12px; }
+      .err { background: #fef2f2; border: 1px solid #fecaca; color: #7f1d1d; border-radius: 10px; padding: 12px 14px; font-size: 13px; margin-top: 12px; }
+      .hidden { display: none !important; }
+      footer { margin-top: 30px; border-top: 1px solid var(--border); padding-top: 16px; color: var(--muted); font-size: 13px; }
+      a { color: var(--primary); }
+      code { background: var(--soft); padding: 1px 5px; border-radius: 4px; font-size: 12px; }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <header><h1>3D 현장 복원</h1></header>
+      <p class="lead">
+        건물을 한 바퀴 돌며 찍은 영상에서 공간을 3차원으로 복원하고, 실측 기준 하나로
+        면적·부피를 산출합니다.
+      </p>
+
+      <div class="card">
+        <h2>1. 현장 영상</h2>
+        <p class="sub">
+          20~60초. 벽에서 2~3m 떨어져 <b>천천히</b> 이동하며, 화면이 이전 위치와 절반 이상
+          겹치도록 촬영하세요. 빠르게 돌리면 복원이 실패합니다.
+        </p>
+        <label class="file" for="file">
+          영상 선택 또는 촬영
+          <span id="fileName">아직 선택하지 않았습니다</span>
+        </label>
+        <input id="file" type="file" accept="video/*" capture="environment" />
+      </div>
+
+      <div class="card">
+        <h2>2. 크기 기준 <span style="font-weight:400;color:var(--muted);font-size:13px">(선택)</span></h2>
+        <p class="sub">
+          사진만으로 만든 3D 는 <b>형상은 알아도 크기는 모릅니다</b>. 실제로 잰 길이를 하나
+          알려주면 전체를 미터로 환산합니다. 비워두면 형상만 봅니다.
+        </p>
+        <div class="row">
+          <div class="field">
+            <label for="axis">기준 축</label>
+            <select id="axis">
+              <option value="">사용 안 함</option>
+              <option value="x">가장 긴 방향(가로)</option>
+              <option value="y">두 번째 방향(세로)</option>
+              <option value="z">가장 짧은 방향(높이)</option>
+              <option value="diagonal">대각선</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="meters">실제 길이 (m)</label>
+            <input id="meters" type="number" min="0.1" step="0.1" placeholder="예: 12" />
+          </div>
+        </div>
+        <button id="go" disabled>3D 복원 시작</button>
+        <div class="bar"><i id="bar"></i></div>
+        <div id="stage"></div>
+        <div id="error" class="err hidden"></div>
+      </div>
+
+      <div id="result" class="card hidden">
+        <h2>복원 결과</h2>
+        <p class="sub" id="quality"></p>
+        <div id="viewer"></div>
+        <div class="stats" id="stats"></div>
+        <div id="scaleNote" class="note hidden"></div>
+      </div>
+
+      <footer>
+        <a href="/">← 사진 분석으로</a> · <a href="/judge.html">체험 안내</a>
+      </footer>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/0.160.0/three.min.js"></script>
+    <script>
+      // ── 프레임 추출 ─────────────────────────────────────────────────
+      // 서버로 영상을 통째로 보내면 수십 MB 전송 + 서버 ffmpeg 이 필요하다.
+      // 브라우저는 video 를 원하는 시각으로 옮겨 그릴 수 있으니 여기서 뽑아 보낸다.
+      const SAMPLE = 48, KEEP = 28, MAX_EDGE = 1280;
+
+      function sharpness(data, w, h) {
+        // 라플라시안 응답의 분산 — 흔들린 프레임은 고주파가 사라져 값이 급락한다.
+        const g = new Float32Array(w * h);
+        for (let i = 0, p = 0; i < g.length; i++, p += 4)
+          g[i] = 0.299 * data[p] + 0.587 * data[p + 1] + 0.114 * data[p + 2];
+        let s = 0, sq = 0, n = 0;
+        for (let y = 1; y < h - 1; y += 2) for (let x = 1; x < w - 1; x += 2) {
+          const i = y * w + x;
+          const l = 4 * g[i] - g[i - 1] - g[i + 1] - g[i - w] - g[i + w];
+          s += l; sq += l * l; n++;
+        }
+        return n ? sq / n - (s / n) ** 2 : 0;
+      }
+
+      function seek(v, t) {
+        return new Promise((res, rej) => {
+          const ok = () => { v.removeEventListener('seeked', ok); res(); };
+          v.addEventListener('seeked', ok);
+          v.addEventListener('error', () => rej(new Error('영상 탐색 실패')), { once: true });
+          v.currentTime = Math.max(0, t);
+        });
+      }
+
+      // 선명도만 보면 한 구간에 몰려 삼각측량이 안 된다. 구간을 나눠 각 구간의 최선을 뽑는다.
+      function pickSpread(frames, keep) {
+        if (frames.length <= keep) return frames;
+        const size = frames.length / keep, out = [];
+        for (let b = 0; b < keep; b++) {
+          const from = Math.floor(b * size), to = Math.min(frames.length, Math.floor((b + 1) * size));
+          let best = frames[from];
+          for (let i = from + 1; i < to; i++) if (frames[i].sharpness > best.sharpness) best = frames[i];
+          out.push(best);
+        }
+        return out;
+      }
+
+      async function extractFrames(file, onProgress) {
+        const url = URL.createObjectURL(file);
+        const v = document.createElement('video');
+        v.preload = 'auto'; v.muted = true; v.playsInline = true; v.src = url;
+        try {
+          await new Promise((res, rej) => {
+            v.onloadedmetadata = res;
+            v.onerror = () => rej(new Error('영상을 열지 못했습니다. 다른 형식으로 시도해 주세요.'));
+          });
+          const dur = v.duration;
+          if (!isFinite(dur) || dur <= 0) throw new Error('영상 길이를 확인하지 못했습니다.');
+          const sc = Math.min(1, MAX_EDGE / Math.max(v.videoWidth, v.videoHeight));
+          const w = Math.round(v.videoWidth * sc), h = Math.round(v.videoHeight * sc);
+          const cv = document.createElement('canvas');
+          cv.width = w; cv.height = h;
+          const ctx = cv.getContext('2d', { willReadFrequently: true });
+          const frames = [];
+          const a = dur * 0.03, b = dur * 0.97;  // 처음·끝은 손떨림 구간
+          for (let i = 0; i < SAMPLE; i++) {
+            await seek(v, a + ((b - a) * i) / (SAMPLE - 1));
+            ctx.drawImage(v, 0, 0, w, h);
+            const img = ctx.getImageData(0, 0, w, h);
+            const b64 = cv.toDataURL('image/jpeg', 0.82).split(',')[1];
+            if (b64) frames.push({ base64: b64, sharpness: sharpness(img.data, w, h) });
+            onProgress(i + 1, SAMPLE);
+          }
+          return pickSpread(frames, KEEP);
+        } finally {
+          URL.revokeObjectURL(url); v.removeAttribute('src'); v.load();
+        }
+      }
+
+      // ── 3D 뷰어 ────────────────────────────────────────────────────
+      let renderer, scene, camera, cloud, raf;
+      function renderCloud(points, cameras) {
+        const host = document.getElementById('viewer');
+        host.innerHTML = '';
+        const w = host.clientWidth, h = host.clientHeight;
+
+        scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x0f172a);
+        camera = new THREE.PerspectiveCamera(55, w / h, 0.01, 5000);
+        renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+        renderer.setSize(w, h);
+        host.appendChild(renderer.domElement);
+
+        // 점군을 원점 기준으로 옮기고 화면에 맞게 정규화한다.
+        const pos = new Float32Array(points.length * 3);
+        const c = [0, 0, 0];
+        points.forEach(p => { c[0] += p[0]; c[1] += p[1]; c[2] += p[2]; });
+        c.forEach((_, i) => c[i] /= points.length || 1);
+        let maxR = 0;
+        points.forEach((p, i) => {
+          const x = p[0] - c[0], y = p[1] - c[1], z = p[2] - c[2];
+          pos[i * 3] = x; pos[i * 3 + 1] = y; pos[i * 3 + 2] = z;
+          maxR = Math.max(maxR, Math.hypot(x, y, z));
+        });
+        const geo = new THREE.BufferGeometry();
+        geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+        cloud = new THREE.Points(geo, new THREE.PointsMaterial({ color: 0x93c5fd, size: maxR / 220 }));
+        scene.add(cloud);
+
+        // 촬영 동선 — 어디를 돌며 찍었는지 보이면 빠진 구간을 알 수 있다.
+        if (cameras && cameras.length > 1) {
+          const cp = new Float32Array(cameras.length * 3);
+          cameras.forEach((p, i) => {
+            cp[i * 3] = p[0] - c[0]; cp[i * 3 + 1] = p[1] - c[1]; cp[i * 3 + 2] = p[2] - c[2];
+          });
+          const cg = new THREE.BufferGeometry();
+          cg.setAttribute('position', new THREE.BufferAttribute(cp, 3));
+          scene.add(new THREE.Line(cg, new THREE.LineBasicMaterial({ color: 0xff5d28 })));
+        }
+
+        let rx = 0.3, ry = 0.6, dist = maxR * 2.6, dragging = false, lx = 0, ly = 0;
+        const apply = () => {
+          camera.position.set(
+            dist * Math.cos(rx) * Math.sin(ry),
+            dist * Math.sin(rx),
+            dist * Math.cos(rx) * Math.cos(ry),
+          );
+          camera.lookAt(0, 0, 0);
+        };
+        apply();
+
+        const el = renderer.domElement;
+        el.addEventListener('pointerdown', e => { dragging = true; lx = e.clientX; ly = e.clientY; el.setPointerCapture(e.pointerId); });
+        el.addEventListener('pointerup', e => { dragging = false; el.releasePointerCapture(e.pointerId); });
+        el.addEventListener('pointermove', e => {
+          if (!dragging) return;
+          ry -= (e.clientX - lx) * 0.006;
+          rx = Math.max(-1.4, Math.min(1.4, rx + (e.clientY - ly) * 0.006));
+          lx = e.clientX; ly = e.clientY; apply();
+        });
+        el.addEventListener('wheel', e => {
+          e.preventDefault();
+          dist = Math.max(maxR * 0.4, Math.min(maxR * 8, dist * (1 + Math.sign(e.deltaY) * 0.12)));
+          apply();
+        }, { passive: false });
+
+        cancelAnimationFrame(raf);
+        (function loop() {
+          raf = requestAnimationFrame(loop);
+          if (!dragging) { ry += 0.0015; apply(); }   // 조작 전에는 천천히 돈다
+          renderer.render(scene, camera);
+        })();
+      }
+
+      // ── 흐름 ───────────────────────────────────────────────────────
+      const $ = id => document.getElementById(id);
+      let picked = null;
+
+      $('file').addEventListener('change', e => {
+        picked = e.target.files[0] || null;
+        $('fileName').textContent = picked
+          ? `${picked.name} · ${(picked.size / 1e6).toFixed(1)}MB`
+          : '아직 선택하지 않았습니다';
+        $('go').disabled = !picked;
+      });
+
+      function setStage(t, pct) {
+        $('stage').textContent = t;
+        if (pct != null) $('bar').style.width = pct + '%';
+      }
+      function showError(msg) {
+        $('error').textContent = msg;
+        $('error').classList.remove('hidden');
+      }
+
+      $('go').addEventListener('click', async () => {
+        if (!picked) return;
+        $('go').disabled = true;
+        $('error').classList.add('hidden');
+        $('result').classList.add('hidden');
+        try {
+          setStage('영상에서 프레임을 뽑는 중…', 2);
+          const frames = await extractFrames(picked, (d, t) => {
+            setStage(`영상에서 프레임을 뽑는 중… ${d}/${t}`, (d / t) * 35);
+          });
+          if (frames.length < 8) throw new Error('쓸 만한 프레임이 부족합니다. 더 길게, 천천히 촬영해 주세요.');
+
+          setStage(`${frames.length}장으로 3D 복원 중… 수 분 걸립니다`, 45);
+          const axis = $('axis').value;
+          const meters = parseFloat($('meters').value);
+          const body = { frames: frames.map(f => f.base64) };
+          if (axis && isFinite(meters) && meters > 0) body.scaleReference = { axis, realMeters: meters };
+
+          const res = await fetch('/api/recon/reconstruct', {
+            method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body),
+          });
+          const data = await res.json();
+          setStage('', 100);
+
+          if (!data.ok) {
+            showError(`복원 실패 (${data.stage}): ${data.log || '원인을 확인하지 못했습니다.'}`);
+            return;
+          }
+
+          $('result').classList.remove('hidden');
+          const q = data.quality || {};
+          $('quality').textContent =
+            `${data.registeredImages}/${data.totalImages}장 정합 · 점 ${data.pointCount.toLocaleString()}개 · ` +
+            `${data.elapsedSec}초 소요` + (q.advice ? ` — ${q.advice}` : '');
+
+          renderCloud(data.points, data.cameras);
+
+          const d = data.dimensions;
+          $('stats').innerHTML = d
+            ? [
+                ['가로', d.widthM + 'm'], ['세로', d.depthM + 'm'], ['높이', d.heightM + 'm'],
+                ['바닥면적', d.floorAreaM2 + '㎡'], ['부피', d.volumeM3 + '㎥'],
+              ].map(([k, v]) => `<div class="stat"><span>${k}</span><b>${v}</b></div>`).join('')
+            : [
+                ['정합 이미지', `${data.registeredImages}장`],
+                ['복원 점', data.pointCount.toLocaleString()],
+                ['소요', data.elapsedSec + '초'],
+              ].map(([k, v]) => `<div class="stat"><span>${k}</span><b>${v}</b></div>`).join('');
+
+          const note = $('scaleNote');
+          note.classList.remove('hidden');
+          note.innerHTML = d
+            ? `입력하신 기준(${$('axis').selectedOptions[0].text} = ${meters}m)으로 환산한 값입니다. ` +
+              `기준이 부정확하면 전체 치수가 같은 비율로 어긋납니다.`
+            : `<b>크기 기준을 입력하지 않아 치수를 낼 수 없습니다.</b> 사진만으로 만든 3D 는 ` +
+              `형상은 알아도 실제 크기는 알 수 없습니다. 현장에서 잰 길이를 하나 넣어 다시 시도해 주세요.`;
+        } catch (e) {
+          showError(e.message || '복원 중 문제가 발생했습니다.');
+        } finally {
+          $('go').disabled = false;
+          setStage('');
+        }
+      });
+    </script>
+  </body>
+</html>

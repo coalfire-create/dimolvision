@@ -31,7 +31,7 @@ export function FloatingSupportButton({ onPress }: { onPress?: () => void }) {
       onPress={onPress ?? (() => Linking.openURL(SUPPORT_PHONE_TEL_URL))}
       style={styles.fab}
     >
-      <Text style={styles.fabIcon}>💬</Text>
+      <AppIcon name="chat" size={24} color="#FFFFFF" />
     </Pressable>
   );
 }

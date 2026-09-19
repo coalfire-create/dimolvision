@@ -33,16 +33,16 @@ interface CameraCaptureModalProps {
 const GUIDE_TIPS = [
   '밝은 곳에서, 그림자 없이 선명하게',
   '정면에서 흔들리지 않게 잡고',
-  '여러 각도로 3~4장 찍으면 AI 분석이 정확해져요',
+  '여러 각도로 3~4장 촬영하면 분석이 정확해집니다',
 ];
 
 // 다중 촬영을 유도하는 순서 가이드 — AI가 소재·위험요소를 더 잘 잡도록.
 const SHOT_GUIDE = [
-  { emoji: '🏠', label: '① 현장 전경', hint: '건물·현장 전체가 한 화면에 들어오게' },
-  { emoji: '🧱', label: '② 벽·바닥 근접', hint: '주요 벽체·바닥 마감재가 잘 보이게 가까이' },
-  { emoji: '🔺', label: '③ 지붕·천장', hint: '지붕재·천장 구조를 위로 향해 촬영' },
-  { emoji: '⚠️', label: '④ 위험·특이 부위', hint: '석면 의심 슬레이트·배관·설비 등 우려 부위' },
-  { emoji: '📸', label: '추가 각도', hint: '놓친 부분을 다른 각도로 보강 촬영' },
+  { step: '1', label: '현장 전경', hint: '건물·현장 전체가 한 화면에 들어오게' },
+  { step: '2', label: '벽·바닥 근접', hint: '주요 벽체·바닥 마감재가 잘 보이게 가까이' },
+  { step: '3', label: '지붕·천장', hint: '지붕재·천장 구조를 위로 향해 촬영' },
+  { step: '4', label: '위험·특이 부위', hint: '석면 의심 슬레이트·배관·설비 등 우려 부위' },
+  { step: '+', label: '추가 각도', hint: '놓친 부분을 다른 각도로 보강 촬영' },
 ];
 
 /**
@@ -110,7 +110,7 @@ export function CameraCaptureModal({
         {permissionPending ? (
           <View style={styles.centerFill}>
             <ActivityIndicator size="large" color="#FFFFFF" />
-            <Text style={styles.permSub}>카메라를 준비하고 있어요…</Text>
+            <Text style={styles.permSub}>카메라 준비 중</Text>
             {/* 카메라가 없는 데스크톱 등에서는 권한 응답이 오지 않을 수 있다.
                 빠져나갈 길이 없으면 막다른 화면이 되므로 항상 닫기를 둔다. */}
             <Pressable style={styles.permClose} onPress={handleClose} accessibilityRole="button">
@@ -141,7 +141,7 @@ export function CameraCaptureModal({
               {/* 상단 헤더 + 촬영 팁 */}
               <View style={styles.topBar} pointerEvents="box-none">
                 <View style={styles.topRow}>
-                  <Text style={styles.topTitle}>📷 현장 촬영 가이드</Text>
+                  <Text style={styles.topTitle}>현장 촬영 가이드</Text>
                   <Pressable style={styles.closeBtn} onPress={handleClose} accessibilityRole="button">
                     <Text style={styles.closeBtnText}>✕</Text>
                   </Pressable>
@@ -150,7 +150,7 @@ export function CameraCaptureModal({
                 {/* 다음에 찍으면 좋은 컷 안내 (AI 종합 분석 유도) */}
                 <View style={styles.nextGuideCard}>
                   <Text style={styles.nextGuideLabel}>
-                    {nextGuide.emoji} 다음 촬영: {nextGuide.label}
+                    다음 촬영: {nextGuide.label}
                   </Text>
                   <Text style={styles.nextGuideHint}>{nextGuide.hint}</Text>
                 </View>
@@ -158,7 +158,7 @@ export function CameraCaptureModal({
                 <View style={styles.tipCard}>
                   {GUIDE_TIPS.map((tip, i) => (
                     <View key={i} style={styles.tipRow}>
-                      <Text style={styles.tipCheck}>✓</Text>
+                      <Text style={styles.tipCheck}>·</Text>
                       <Text style={styles.tipText}>{tip}</Text>
                     </View>
                   ))}
@@ -238,7 +238,7 @@ export function CameraCaptureModal({
                 </View>
 
                 {reachedMax ? (
-                  <Text style={styles.maxHint}>최대 {maxPhotos}장까지 촬영할 수 있어요</Text>
+                  <Text style={styles.maxHint}>최대 {maxPhotos}장</Text>
                 ) : null}
               </View>
             </View>

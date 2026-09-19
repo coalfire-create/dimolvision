@@ -50,10 +50,10 @@ const MAX_PHOTOS = 6;
  * (진행률을 지어내지 않는다 — 모델 응답 시점을 미리 알 수 없다.)
  */
 const ANALYSIS_STAGES = [
-  { at: 0, label: '현장 사진을 업로드하고 있어요' },
-  { at: 3, label: 'AI 가 사진 속 소재를 살펴보는 중이에요' },
-  { at: 8, label: '철거 공정과 위험요소를 정리하는 중이에요' },
-  { at: 16, label: '거의 다 됐어요. 리포트를 마무리하는 중이에요' },
+  { at: 0, label: '현장 사진 업로드' },
+  { at: 3, label: '사진 속 소재 식별' },
+  { at: 8, label: '철거 공정·위험요소 정리' },
+  { at: 16, label: '리포트 생성 마무리' },
 ];
 
 function AnalysisProgress() {
@@ -68,7 +68,7 @@ function AnalysisProgress() {
       <ActivityIndicator color={theme.colors.primary} />
       <View style={{ flex: 1 }}>
         <Text style={styles.progressLabel}>{stage.label}</Text>
-        <Text style={styles.progressMeta}>{elapsed}초 경과 · 보통 10~20초 걸려요</Text>
+        <Text style={styles.progressMeta}>{elapsed}초 경과 · 평균 10~20초 소요</Text>
       </View>
     </View>
   );
@@ -167,7 +167,7 @@ export function SiteAnalysisScreen() {
         uri: a.uri,
       }));
     if (picked.length === 0) {
-      setError('사진을 불러오지 못했어요. 다시 시도해 주세요.');
+      setError('사진을 불러오지 못했습니다. 다시 시도해 주세요.');
       return;
     }
     setResult(null);
@@ -243,7 +243,7 @@ export function SiteAnalysisScreen() {
     try {
       await runAnalysis(images);
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : '분석에 실패했어요. 다시 시도해 주세요.');
+      setError(err instanceof ApiError ? err.message : '분석에 실패했습니다. 다시 시도해 주세요.');
     } finally {
       setLoading(false);
     }
@@ -264,7 +264,7 @@ export function SiteAnalysisScreen() {
       await runAnalysis([picked]);
     } catch (err) {
       setError(
-        err instanceof ApiError ? err.message : '샘플 분석에 실패했어요. 다시 시도해 주세요.',
+        err instanceof ApiError ? err.message : '샘플 분석에 실패했습니다. 다시 시도해 주세요.',
       );
     } finally {
       setLoading(false);
@@ -285,13 +285,12 @@ export function SiteAnalysisScreen() {
           <View style={styles.heroCard}>
             <View style={styles.heroBadgeRow}>
               <View style={styles.heroCardBadge}>
-                <View style={styles.pulseDot} />
-                <Text style={styles.heroCardBadgeText}>비전 AI 실시간 분석</Text>
+                <Text style={styles.heroCardBadgeText}>비전 AI 분석</Text>
               </View>
               <Text style={styles.heroEngineTag}>다중 모델 폴백 구조</Text>
             </View>
             <Text style={styles.heroCardTitle}>
-              현장 사진을 올리면{'\n'}소재·공정·물량을 한 번에 분석해요
+              현장 사진으로{'\n'}소재·공정·물량을 분석합니다
             </Text>
             <View style={styles.heroChipsRow}>
               <View style={styles.heroChip}>
@@ -308,9 +307,9 @@ export function SiteAnalysisScreen() {
               </View>
             </View>
             <View style={styles.noLoginRow}>
-              <AppIcon name="sparkles" size={14} color="#34D399" />
+              <AppIcon name="check" size={14} color="#34D399" />
               <Text style={styles.noLoginText}>
-                회원가입·로그인 없이 모든 기능을 바로 쓸 수 있어요
+                회원가입·로그인 없이 모든 기능 이용
               </Text>
             </View>
           </View>
@@ -320,12 +319,9 @@ export function SiteAnalysisScreen() {
         {images.length === 0 ? (
           <FadeInUp delay={100}>
             <View style={styles.sampleSection}>
-              <View style={styles.sampleHeadRow}>
-                <AppIcon name="sparkles" size={18} color={theme.colors.primary} />
-                <Text style={styles.sampleHeadTitle}>사진이 없으신가요? 바로 체험해 보세요</Text>
-              </View>
+              <Text style={styles.sampleHeadTitle}>샘플로 바로 체험</Text>
               <Text style={styles.sampleHeadSub}>
-                실제 철거 현장 사진입니다. 누르면 즉시 AI 분석이 실행됩니다.
+                실제 철거 현장 사진입니다. 누르면 분석이 시작됩니다.
               </Text>
               <View style={styles.sampleRow}>
                 {SAMPLE_SITES.map((s) => (
@@ -370,7 +366,7 @@ export function SiteAnalysisScreen() {
               <Image source={{ uri: images[0]!.uri }} style={styles.preview} resizeMode="cover" />
               {images.length > 1 ? (
                 <View style={styles.multiBadge}>
-                  <AppIcon name="sparkles" size={13} color="#FFFFFF" />
+                  <AppIcon name="camera" size={13} color="#FFFFFF" />
                   <Text style={styles.multiBadgeText}>{images.length}장 종합 분석</Text>
                 </View>
               ) : null}
@@ -404,7 +400,7 @@ export function SiteAnalysisScreen() {
 
             {images.length < MAX_PHOTOS ? (
               <Text style={styles.addMoreHint}>
-                각도를 바꿔 더 찍으면 정확도가 올라가요 — 전경 · 벽/바닥 근접 · 지붕 · 위험 부위
+                각도를 달리해 촬영할수록 식별 정확도가 올라갑니다. 전경 · 벽/바닥 근접 · 지붕 · 위험 부위
                 (최대 {MAX_PHOTOS}장)
               </Text>
             ) : null}
@@ -417,9 +413,9 @@ export function SiteAnalysisScreen() {
                 <Image source={brandmark} style={styles.dropzoneLogo} resizeMode="contain" />
               </View>
               <View style={{ flex: 1 }}>
-                <Text style={styles.dropzoneTitle}>직접 찍은 현장 사진도 분석해요</Text>
+                <Text style={styles.dropzoneTitle}>직접 촬영한 사진도 분석</Text>
                 <Text style={styles.dropzoneSub}>
-                  건물 내부·지붕·자재가 잘 보이게 찍을수록 정확해집니다
+                  건물 내부·지붕·자재가 잘 보이게 촬영할수록 정확합니다
                 </Text>
               </View>
             </View>
@@ -454,11 +450,11 @@ export function SiteAnalysisScreen() {
         {images.length > 0 && !loading ? (
           <FadeInUp delay={60}>
             <View style={styles.areaCard}>
-              <Text style={styles.areaTitle}>건물 정보를 알면 더 정확해져요</Text>
+              <Text style={styles.areaTitle}>건물 정보 (선택)</Text>
               <Text style={styles.areaSub}>
                 {result
-                  ? '연면적·건축년도를 넣고 다시 분석하면 물량과 석면 위험까지 정밀해집니다.'
-                  : '선택 입력이에요. 비워두면 소재·공정 분석만 진행합니다.'}
+                  ? '연면적·건축년도를 입력해 다시 분석하면 물량과 석면 판단이 정밀해집니다.'
+                  : '비워두면 소재·공정만 분석합니다.'}
               </Text>
               <View style={styles.fieldRow}>
                 <View style={styles.field}>
@@ -496,7 +492,7 @@ export function SiteAnalysisScreen() {
               </View>
               {buildingYear() !== undefined && buildingYear()! < 2009 ? (
                 <Text style={styles.yearHint}>
-                  2009년 석면 사용 금지 이전 건축물이라 석면 의심 자재를 중점 확인합니다
+                  2009년 석면 사용 금지 이전 건축물 — 석면 의심 자재를 중점 확인합니다
                 </Text>
               ) : null}
 
@@ -532,8 +528,7 @@ export function SiteAnalysisScreen() {
         {/* 로그인이 없어도 수집·이용 고지는 제공한다(사진은 분석 즉시 폐기, 저장하지 않음). */}
         <View style={styles.legalFooter}>
           <Text style={styles.legalNotice}>
-            업로드한 사진은 분석에만 사용하고 서버에 저장하지 않습니다. 회원가입·로그인 없이
-            이용할 수 있습니다.
+            업로드한 사진은 분석에만 사용하며 서버에 저장하지 않습니다.
           </Text>
           <View style={styles.legalLinks}>
             <Text style={styles.legalLink} onPress={() => openPage('privacy')}>
@@ -775,7 +770,7 @@ function ShareReportButton({
       >
         <AppIcon name="document" size={16} color={theme.colors.primary} />
         <Text style={styles.shareBtnText}>
-          {copied ? '복사했어요' : Platform.OS === 'web' ? '리포트 복사' : '리포트 공유'}
+          {copied ? '리포트가 복사되었습니다' : Platform.OS === 'web' ? '리포트 복사' : '리포트 공유'}
         </Text>
       </PressableScale>
 
@@ -964,10 +959,7 @@ function AnalysisResult({ result, estimate }: { result: SiteAnalysis; estimate: 
       <FadeInUp delay={40}>
         <View style={styles.summaryCard}>
           <View style={styles.summaryTop}>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-              <AppIcon name="sparkles" size={20} color={theme.colors.primary} />
-              <Text style={styles.summaryLabel}>현장 분석 진단서</Text>
-            </View>
+            <Text style={styles.summaryLabel}>분석 결과</Text>
             <View style={styles.methodChip}>
               <Text style={styles.methodChipText}>
                 {result.method === 'AI_VISION' ? 'AI 실시간 분석' : '시연용 샘플'}
@@ -1000,7 +992,7 @@ function AnalysisResult({ result, estimate }: { result: SiteAnalysis; estimate: 
         </Card>
       </FadeInUp>
 
-      <Text style={styles.sectionTitle}>권장 철거 공정 절차</Text>
+      <Text style={styles.sectionTitle}>권장 철거 공정</Text>
       {result.demolitionSteps.map((s, i) => (
         <FadeInUp key={s.order} delay={140 + i * 60}>
           <Card style={styles.stepCard}>
@@ -1034,7 +1026,7 @@ function AnalysisResult({ result, estimate }: { result: SiteAnalysis; estimate: 
           <View style={styles.hazardCard}>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: spacing.xs }}>
               <AppIcon name="alert" size={20} color={colors.error} />
-              <Text style={styles.hazardTitle}>현장 안전 위험 요소 경고</Text>
+              <Text style={styles.hazardTitle}>안전 위험요소</Text>
             </View>
             {result.hazards.map((h, i) => (
               <Text key={i} style={styles.hazardItem}>
@@ -1092,13 +1084,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
     paddingVertical: 4,
     borderRadius: 999,
-  },
-  pulseDot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-    backgroundColor: '#60A5FA',
-    marginRight: 6,
   },
   heroCardBadgeText: {
     color: '#93C5FD',
@@ -1201,11 +1186,6 @@ const styles = StyleSheet.create({
     borderRadius: radius.card,
     padding: spacing.md,
     marginBottom: spacing.md,
-  },
-  sampleHeadRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
   },
   sampleHeadTitle: {
     color: colors.text,

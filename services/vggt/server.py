@@ -37,7 +37,7 @@ from vggt.utils.geometry import unproject_depth_map_to_point_map
 
 # 한 번에 넣는 최대 장수. VGGT 는 모든 프레임을 함께 보므로 메모리가 장수의 제곱으로
 # 늘어난다. L4(24GB)에서 안전한 범위로 잡고, 더 오면 고르게 솎아 쓴다.
-MAX_VIEWS = int(os.environ.get("VGGT_MAX_VIEWS", "32"))
+MAX_VIEWS = int(os.environ.get("VGGT_MAX_VIEWS", "48"))
 # 돌려줄 점 개수 상한. 조밀 깊이라 그대로 두면 수백만 개가 나와 전송이 감당하지 못한다.
 MAX_POINTS = 20000
 # 신뢰도 하위 구간은 버린다. 하늘·유리처럼 깊이를 못 정한 화소가 형상을 망친다.
@@ -138,8 +138,12 @@ def reconstruct(img_dir: str) -> dict:
     return {
         "ok": True,
         # VGGT 는 넣은 사진을 전부 쓴다 — COLMAP 처럼 "등록 실패" 로 빠지는 장이 없다.
+        # 그래서 totalImages 는 **실제로 쓴 장수**다. 보낸 장수를 쓰면 메모리 때문에
+        # 솎아낸 것이 "복원 실패" 로 보여, 멀쩡한 결과에 "일부 구간이 복원되지
+        # 않았습니다" 라는 틀린 안내가 붙는다.
         "registeredImages": int(len(used)),
-        "totalImages": int(total),
+        "totalImages": int(len(used)),
+        "inputFrames": int(total),
         "pointCount": int(len(pts)),
         "extent": robust_extent(pts),
         "cameraPathLength": path_len,

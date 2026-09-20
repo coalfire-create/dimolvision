@@ -1248,6 +1248,42 @@ let CAPTURE_QUALITY = 0.58;
       if (!navigator.mediaDevices?.getUserMedia) setMode(false);
       else setMode(true);
 
+      /**
+       * 데모 모드(?demo=1).
+       *
+       * 심사·시연 상황에서는 철거 현장 영상을 가진 사람이 거의 없다. 그렇다고 결과만
+       * 미리 만들어 보여주면 그건 시연이 아니라 그림이다. 그래서 저장소에 담긴 실제
+       * 현장 영상을 **같은 경로로** 돌린다 — 프레임 추출부터 복원까지 전부 진짜로 한다.
+       *
+       * 업로드된 사용자 영상은 저장하지 않으므로(개인정보처리방침) 데모용 영상은
+       * 저장소에 포함해 둔다.
+       */
+      const DEMO_VIDEO = '/samples/demo-site.mp4';
+
+      async function runDemo() {
+        setMode(false);                       // 파일 모드로 전환
+        $('camErr').classList.add('hidden');
+        setStage('데모 영상을 불러오는 중…', 1);
+        warmupGpu();
+        try {
+          const res = await fetch(DEMO_VIDEO);
+          if (!res.ok) throw new Error('데모 영상을 불러오지 못했습니다.');
+          const blob = await res.blob();
+          picked = new File([blob], 'demo-site.mp4', { type: 'video/mp4' });
+          $('fileName').textContent = `데모 현장 영상 · ${(picked.size / 1e6).toFixed(1)}MB`;
+          $('go').disabled = false;
+          $('go').click();
+        } catch (e) {
+          setStage('');
+          showError(e.message || '데모를 시작하지 못했습니다.');
+        }
+      }
+
+      // 데모로 들어왔으면 자동으로 시작한다 — 누를 것을 또 누르게 하지 않는다.
+      if (new URLSearchParams(location.search).get('demo') === '1') {
+        void loadRegisterFromUrl().then(runDemo);
+      }
+
       // 지도에서 넘어왔으면 대장을 미리 받아 둔다(복원이 끝나면 바로 쓰려고).
       void loadRegisterFromUrl();
 

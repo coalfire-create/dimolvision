@@ -262,6 +262,24 @@ function openInternal(path: string): void {
   void Linking.openURL(path);
 }
 
+/**
+ * 데모 — 실제 현장 영상과 실제 건축물대장으로 전 과정을 한 번에 보여준다.
+ *
+ * 철거 현장 영상을 가진 사람은 거의 없다. 그렇다고 결과만 미리 만들어 두면 그건
+ * 시연이 아니라 그림이다. 저장소에 담긴 실제 촬영 영상을 **사용자와 똑같은 경로로**
+ * 돌린다 — 프레임 추출·3D 복원·소재 분석·견적까지 전부 그 자리에서 계산한다.
+ *
+ * 주소는 실제 건물이다(서울 마포구 연남동 225-35 · MH빌딩). 대장이 붙어야
+ * 연면적·층고가 오고, 그래야 물량·공사비·3D 실측이 전부 나온다.
+ */
+const DEMO_PARCEL: PickedParcel = {
+  sigunguCd: '11440',
+  bjdongCd: '12400',
+  bun: '0225',
+  ji: '0035',
+  address: '서울 마포구 연남동 225-35',
+};
+
 function mimeFromUri(uri: string): string {
   return uri.toLowerCase().endsWith('.png') ? 'image/png' : 'image/jpeg';
 }
@@ -471,6 +489,18 @@ export function SiteAnalysisScreen() {
    * 3D 페이지가 그 건물의 실제 층고를 대장에서 받아 크기 기준을 자동으로 정한다.
    * 안 넘기면 사용자가 "층고 2.4m" 같은 표준값을 추측해 골라야 한다.
    */
+  /** 데모 — 실제 지번을 달고 3D 페이지를 데모 모드로 연다. */
+  function demoUrl(): string {
+    const q = new URLSearchParams({
+      demo: '1',
+      sigunguCd: DEMO_PARCEL.sigunguCd,
+      bjdongCd: DEMO_PARCEL.bjdongCd,
+      bun: DEMO_PARCEL.bun,
+      ji: DEMO_PARCEL.ji,
+    });
+    return `/recon.html?${q.toString()}`;
+  }
+
   function reconUrl(): string {
     if (!parcel) return '/recon.html';
     const q = new URLSearchParams({
@@ -582,6 +612,24 @@ export function SiteAnalysisScreen() {
             </View>
           </FadeInUp>
         )}
+
+        {/* 사진도 주소도 없이 들어온 사람을 위한 경로. 실제 영상·실제 대장으로 돈다. */}
+        <FadeInUp delay={90}>
+          <PressableScale
+            style={styles.demoCard}
+            onPress={() => openInternal(demoUrl())}
+            accessibilityRole="button"
+          >
+            <View style={{ flex: 1 }}>
+              <Text style={styles.demoTitle}>데모로 전체 흐름 보기</Text>
+              <Text style={styles.demoSub}>
+                실제 철거 현장 영상과 실제 건축물대장(연남동 MH빌딩)으로 3D 복원·실측·
+                소재 분석·공사비까지 그 자리에서 계산합니다. 준비물 없이 눌러만 보세요.
+              </Text>
+            </View>
+            <AppIcon name="sparkles" size={22} color={theme.colors.primary} />
+          </PressableScale>
+        </FadeInUp>
 
         {/* 지도에서 현장을 찍으면 건축물대장이 붙는다 — 연면적·구조·연도를 손으로 몰라도 된다. */}
         <FadeInUp delay={50}>
@@ -1656,6 +1704,19 @@ const styles = StyleSheet.create({
   },
   videoCtaText: { color: '#FFFFFF', fontSize: 15, fontWeight: '700' },
   /** 주소 지정 전 단계 — 눌러도 되지만 왜 안 되는지 알려준다. */
+  demoCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    backgroundColor: colors.primarySoft,
+    borderColor: colors.primary,
+    borderWidth: 1.5,
+    borderRadius: radius.card,
+    padding: spacing.md,
+    marginTop: spacing.md,
+  },
+  demoTitle: { color: colors.primary, fontSize: font.bodyLarge, fontWeight: '800' },
+  demoSub: { color: colors.text, fontSize: 12, lineHeight: 18, marginTop: 4 },
   cardLocked: { opacity: 0.55 },
   reqChip: {
     backgroundColor: '#FEE2E2',

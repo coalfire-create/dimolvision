@@ -739,6 +739,85 @@ let CAPTURE_QUALITY = 0.58;
         return cur;
       }
 
+      const CAPTURE_HELP = {
+        ROTATING: {
+          title: '제자리에서 카메라만 돌리셨습니다',
+          why:
+            '3D 는 같은 지점을 <b>다른 위치에서</b> 본 차이로 깊이를 계산합니다. 한자리에 서서 ' +
+            '카메라만 돌리면 그 차이가 0 이라 원리적으로 복원되지 않습니다. 프레임을 아무리 ' +
+            '많이 넣어도 결과는 같습니다. (모서리에서 잠깐 도는 것은 정상이며, 오래 이어질 때만 ' +
+            '이 안내가 나옵니다.)',
+          how: [
+            '벽에서 <b>2~3m 떨어져</b> 벽을 바라본 채로 <b>옆으로 걸으세요</b>. 게걸음처럼.',
+            '좁아서 옆으로 못 걸으면 <b>통로를 따라 앞으로</b> 천천히 걸으세요. 그것도 시차가 됩니다.',
+            '카메라는 벽을 향해 고정하고, <b>몸이 이동</b>해야 합니다. 손목으로 훑지 마세요.',
+            '건물을 <b>한 바퀴 돌며</b> 30초 이상 찍으세요. 모서리에서도 멈추지 말고 계속 걸으세요.',
+            '가구·배관·창틀처럼 무늬가 있는 것이 화면에 들어오게 하세요.',
+          ],
+        },
+        STILL: {
+          title: '카메라가 거의 움직이지 않았습니다',
+          why: '한 자리에서 정지한 채로 찍으면 다른 시점이 없어 3D 를 만들 수 없습니다.',
+          how: [
+            '벽을 바라본 채 <b>옆으로 걸으며</b> 촬영하세요.',
+            '좁으면 <b>통로를 따라 앞으로</b> 걸어도 됩니다.',
+            '30초 이상, 건물 한 면을 따라 끝까지 이동하세요.',
+          ],
+        },
+        TOO_FAST: {
+          title: '너무 빠르게 촬영하셨습니다',
+          why:
+            '프레임 사이에 화면이 너무 많이 흘러 같은 지점을 이어 붙일 수 없습니다. ' +
+            '사진끼리 겹치는 부분이 있어야 3D 가 만들어지는데, 빠르게 훑으면 그 겹침이 ' +
+            '사라지고 흔들림으로 특징점도 함께 날아갑니다.',
+          how: [
+            '같은 경로를 <b>두세 배 느리게</b> 걸으며 다시 찍으세요.',
+            '한 면을 훑는 데 최소 <b>20~30초</b>를 쓰세요. 급하게 돌지 마세요.',
+            '걷는 동안 카메라는 벽을 향해 <b>고정</b>하고, 몸만 옆으로 이동하세요.',
+          ],
+        },
+        TEXTURELESS: {
+          title: '맞출 기준점이 없습니다',
+          why:
+            '민무늬 벽·천장만 잡히면 두 사진에서 같은 지점을 찾을 수 없습니다. ' +
+            '사람 눈에는 벽이 보이지만 계산에는 아무 단서가 없습니다.',
+          how: [
+            '가구·배관·창틀·타일 줄눈·바닥 패턴이 화면에 들어오게 하세요.',
+            '너무 가까이 붙지 말고 <b>2~3m</b> 떨어져 넓게 담으세요.',
+            '어두우면 조명을 켜세요. 노출이 날아가면 무늬가 사라집니다.',
+          ],
+        },
+      };
+
+      function showCaptureBlock(capture, onOverride) {
+        const help = CAPTURE_HELP[capture.verdict];
+        if (!help) return false;
+        const box = $('captureBlock');
+        box.classList.remove('hidden');
+        box.innerHTML =
+          `<h3>${help.title}</h3>` +
+          `<p class="why">${help.why}</p>` +
+          `<p class="measured">측정: 시차가 확인된 구간 ${Math.round(capture.movingRatio * 100)}% ` +
+          `(복원에는 35% 이상 필요) · 검사한 프레임 쌍 ${capture.pairs}개</p>` +
+          '<div class="howto"><b>이렇게 다시 찍어 주세요</b><ul>' +
+          help.how.map((h) => `<li>${h}</li>`).join('') +
+          '</ul></div>' +
+          '<button type="button" id="reshoot">다시 촬영하기</button>' +
+          '<button type="button" id="anyway" class="ghost">그래도 복원 시도 (실패 가능성 높음)</button>';
+        $('reshoot').addEventListener('click', () => {
+          box.classList.add('hidden');
+          $('file').value = '';
+          $('go').disabled = true;
+          $('fileName').textContent = '';
+          window.scrollTo({ top: 0, behavior: 'smooth' });
+        });
+        $('anyway').addEventListener('click', () => {
+          box.classList.add('hidden');
+          onOverride();
+        });
+        return true;
+      }
+
       /**
        * 같은 촬영을 사진 분석에도 쓴다.
        *

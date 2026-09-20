@@ -60,7 +60,9 @@ describe('reconQuality — 결과를 믿어도 되는지', () => {
   it('실측 실패 사례(4/28 · 125점)는 POOR', () => {
     const q = reconQuality(mk(4, 28, 125));
     expect(q.level).toBe('POOR');
-    expect(q.advice).toMatch(/제자리|이동/);
+    // 이 사례의 1차 원인은 장수다(28장). 촬영 방식을 지적하기 전에 그걸 먼저 말해야
+    // 사용자가 실제로 고칠 수 있다.
+    expect(q.advice).toMatch(/28장|계속 걸으며/);
   });
 
   it('정합률이 낮아도 점이 충분하면 FAIR — 제자리 회전 구간이 비율을 깎을 뿐이다', () => {
@@ -133,5 +135,32 @@ describe('scaleDimensions — 사람이 아는 축 이름', () => {
     const a = scaleDimensions(extent, { axis: 'shortest', realMeters: 2.4 })!;
     const b = scaleDimensions(extent, { axis: 'longest', realMeters: 9.6 })!;
     expect(a.volumeM3).toBeCloseTo(b.volumeM3, 0);
+  });
+});
+
+describe('reconQuality — 실패 원인을 숫자로 가른다', () => {
+  const base = {
+    ok: true as const, extent: { x: 1, y: 1, z: 1, diagonal: 1.7 },
+    cameraPathLength: 1, points: [], cameras: [], elapsedSec: 10,
+  };
+
+  it('프레임이 적으면 장수를 먼저 지적한다', () => {
+    const q = reconQuality({ ...base, registeredImages: 4, totalImages: 28, pointCount: 125 });
+    expect(q.level).toBe('POOR');
+    expect(q.advice).toContain('28장');
+    expect(q.advice).toContain('계속 걸으며');
+  });
+
+  it('정합은 됐는데 점이 없으면 무늬 문제로 안내한다', () => {
+    // 제대로 걸었는데 민무늬 벽만 담은 경우. 여기서 "제자리에서 돌렸다" 고 하면 틀린 지적이다.
+    const q = reconQuality({ ...base, registeredImages: 45, totalImages: 60, pointCount: 300 });
+    expect(q.advice).toContain('무늬');
+    expect(q.advice).not.toContain('제자리에서 돌기만');
+  });
+
+  it('정합 자체가 안 되면 겹침·시차를 지적한다', () => {
+    const q = reconQuality({ ...base, registeredImages: 8, totalImages: 60, pointCount: 200 });
+    expect(q.advice).toContain('8장만 이어졌습니다');
+    expect(q.advice).toContain('옆으로 이동');
   });
 });

@@ -901,6 +901,13 @@ let CAPTURE_QUALITY = 0.58;
         GAP: 2,              // 몇 틱 전과 비교할지(인접 프레임은 차이가 잡음에 묻힌다)
         SHOT_MS: 420,        // 좋은 구간에서 프레임을 담는 간격
         TARGET: 60,          // 목표 장수(실측에서 정확도 대비 가장 좋았던 수)
+        // 끝내도 되는 최소 장수. 24장으로 뒀던 건 실측을 무시한 값이었다:
+        //   28장 → 정합 4/28 · 점 125 (실패)    60장 → 정합 27/60 · 점 2,194
+        // 20~30장대는 실패 구간이라 "끝내도 된다" 고 말하면 안 된다.
+        MIN_OK: 45,
+        // 흔들린 프레임은 특징점이 사라져 넣을수록 해가 된다. 최근 선명도의 이 비율
+        // 아래로 떨어지면 버린다(걸으며 찍으면 흔들린 프레임이 실제로 섞인다).
+        BLUR_RATIO: 0.55,
         FAST: 26,            // 이보다 빠르면 흔들림으로 특징점이 사라진다
         SMOOTH: 4,           // 코칭 문구가 깜빡이지 않게 최근 판정을 모아 다수결
       };
@@ -940,8 +947,12 @@ let CAPTURE_QUALITY = 0.58;
         $('camBar').style.width = pct + '%';
         $('camStats').textContent =
           `좋은 장면 ${shots} / ${LIVE.TARGET}장` +
-          (shots >= 24 ? ' · 지금 끝내도 복원됩니다' : ' · 24장부터 복원 가능');
-        $('camStop').disabled = shots < 24;
+          (shots >= LIVE.TARGET
+            ? ' · 충분합니다'
+            : shots >= LIVE.MIN_OK
+              ? ' · 끝내도 되지만 60장이 가장 정확합니다'
+              : ` · ${LIVE.MIN_OK}장은 모아야 복원됩니다`);
+        $('camStop').disabled = shots < LIVE.MIN_OK;
       }
 
       async function startLive() {
@@ -976,10 +987,13 @@ let CAPTURE_QUALITY = 0.58;
         const aCtx = aCv.getContext('2d', { willReadFrequently: true });
         const sCv = document.createElement('canvas');
         const sCtx = sCv.getContext('2d');
+        // 흔들림 검사용. 담을 때만 쓰므로 판정 캔버스와 따로 두고 중간 크기로 잡는다.
+        const bCv = document.createElement('canvas');
+        const bCtx = bCv.getContext('2d', { willReadFrequently: true });
 
         liveState = {
           stream, video, shots: [], tinies: [], history: [], lastShot: 0,
-          timer: null, started: Date.now(),
+          sharps: [], timer: null, started: Date.now(),
         };
         setCoach('START', 0);
 
@@ -1023,11 +1037,23 @@ let CAPTURE_QUALITY = 0.58;
           const now = Date.now();
           if (shown === 'GOOD' && now - st.lastShot >= LIVE.SHOT_MS && st.shots.length < LIVE.TARGET) {
             st.lastShot = now;
+
+            // 걸으며 찍으면 흔들린 프레임이 섞인다. 흔들리면 특징점이 사라져
+            // 넣을수록 정합률을 끌어내리므로, 담기 전에 선명도를 본다.
+            const bw = 480, bh = Math.max(8, Math.round((bw * vh) / vw));
+            bCv.width = bw; bCv.height = bh;
+            bCtx.drawImage(video, 0, 0, bw, bh);
+            const sharp = sharpness(bCtx.getImageData(0, 0, bw, bh).data, bw, bh);
+            const ref = st.sharps.length >= 5 ? median(st.sharps) : 0;
+            if (ref > 0 && sharp < ref * LIVE.BLUR_RATIO) return; // 흔들린 프레임은 버린다
+            st.sharps.push(sharp);
+            if (st.sharps.length > 30) st.sharps.shift();
+
             const sc = Math.min(1, MAX_EDGE / Math.max(vw, vh));
             sCv.width = Math.round(vw * sc); sCv.height = Math.round(vh * sc);
             sCtx.drawImage(video, 0, 0, sCv.width, sCv.height);
             const b64 = sCv.toDataURL('image/jpeg', CAPTURE_QUALITY).split(',')[1];
-            if (b64) st.shots.push({ base64: b64, timeSec: (now - st.started) / 1000, tiny });
+            if (b64) st.shots.push({ base64: b64, timeSec: (now - st.started) / 1000, tiny, sharpness: sharp });
             setCoach(shown, st.shots.length);
             if (st.shots.length >= LIVE.TARGET) finishLive();
           }
@@ -1043,11 +1069,13 @@ let CAPTURE_QUALITY = 0.58;
         $('camStart').classList.remove('hidden');
         $('camStart').textContent = '다시 촬영하기';
 
-        if (shots.length < 24) {
+        if (shots.length < LIVE.MIN_OK) {
           $('camErr').classList.remove('hidden');
-          $('camErr').textContent =
-            `좋은 장면을 ${shots.length}장만 얻었습니다. 최소 24장이 필요합니다. ` +
-            '벽을 보며 옆으로 걸으면서 30초 이상 다시 촬영해 주세요.';
+          $('camErr').innerHTML =
+            `좋은 장면을 <b>${shots.length}장</b>만 얻었습니다. 복원에는 최소 ` +
+            `<b>${LIVE.MIN_OK}장</b>이 필요합니다(실측: 28장은 4장만 정합돼 실패, 60장은 27장 정합). ` +
+            '벽을 보며 옆으로 <b>끊지 말고 20~30초</b> 계속 걸으면서 다시 촬영해 주세요. ' +
+            '초록색 안내가 떠 있는 동안에만 장면이 쌓입니다.';
           return;
         }
 

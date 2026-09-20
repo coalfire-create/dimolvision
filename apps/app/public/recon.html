@@ -59,6 +59,33 @@
       .gl li { margin-bottom: 2px; }
       .gwarn { margin: 10px 0 0; padding: 9px 11px; background: var(--warnbg); border: 1px solid var(--warnbd);
                border-radius: 8px; font-size: 12px; color: #78350f; }
+      /* 촬영 모드 전환 */
+      .modes { display: flex; gap: 6px; margin-bottom: 12px; }
+      .mode { flex: 1; margin: 0; padding: 10px; font-size: 13px; font-weight: 700;
+              background: #fff; color: var(--muted); border: 1.5px solid var(--border); }
+      .mode.on { background: var(--soft); color: var(--primary); border-color: var(--primary); }
+
+      /* 라이브 촬영 */
+      .cam { position: relative; border-radius: 12px; overflow: hidden; background: #000;
+             margin-bottom: 10px; }
+      .cam video { display: block; width: 100%; max-height: 60vh; object-fit: cover; }
+      .coach { position: absolute; left: 0; right: 0; top: 0; padding: 12px 14px;
+               font-size: 15px; font-weight: 800; line-height: 1.45; color: #fff;
+               background: linear-gradient(180deg, rgba(0,0,0,.72), rgba(0,0,0,0)); }
+      .coach .sub { display: block; font-size: 12px; font-weight: 500; opacity: .9; margin-top: 2px; }
+      .coach.good { color: #6ee7b7; }
+      .coach.bad { color: #fca5a5; }
+      .coach.warn { color: #fcd34d; }
+      .camfoot { position: absolute; left: 0; right: 0; bottom: 0; padding: 10px 12px 12px;
+                 background: linear-gradient(0deg, rgba(0,0,0,.75), rgba(0,0,0,0)); }
+      .camstats { color: #e2e8f0; font-size: 12px; font-variant-numeric: tabular-nums;
+                  margin-bottom: 6px; }
+      .cambar { height: 6px; background: rgba(255,255,255,.25); border-radius: 999px; overflow: hidden; }
+      .cambar i { display: block; height: 100%; width: 0; background: #34d399; transition: width .25s; }
+      button.ghost { background: none; color: var(--primary); border: 1.5px solid var(--primary);
+                     font-weight: 700; }
+      button.ghost:disabled { color: #9aa4b2; border-color: var(--border); background: none; }
+
       .ox { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 10px 0; }
       .ox > div { border-radius: 10px; padding: 10px; text-align: center; }
       .ox .ok { background: #ecfdf5; border: 1.5px solid #6ee7b7; }
@@ -110,7 +137,34 @@
       </p>
 
       <div class="card">
-        <h2>1. 현장 영상</h2>
+        <h2>1. 현장 촬영</h2>
+        <div class="modes">
+          <button type="button" id="modeLive" class="mode on">웹에서 바로 촬영</button>
+          <button type="button" id="modeFile" class="mode">영상 파일 올리기</button>
+        </div>
+
+        <div id="liveWrap">
+          <div id="camBox" class="cam hidden">
+            <video id="cam" playsinline muted></video>
+            <div id="coach" class="coach"></div>
+            <div class="camfoot">
+              <div id="camStats" class="camstats"></div>
+              <div class="cambar"><i id="camBar"></i></div>
+            </div>
+          </div>
+          <button id="camStart">카메라 켜고 촬영 시작</button>
+          <button id="camStop" class="ghost hidden">촬영 끝내기</button>
+          <div id="camErr" class="err hidden"></div>
+        </div>
+
+        <div id="fileWrap" class="hidden">
+          <label class="file" for="file">
+            영상 선택 또는 촬영
+            <span id="fileName">아직 선택하지 않았습니다</span>
+          </label>
+          <input id="file" type="file" accept="video/*" capture="environment" />
+        </div>
+
         <div class="guide">
           <p class="gtitle">제자리에서 돌리지 말고, <u>걸어서 이동</u>하며 찍으세요</p>
           <p class="gbody">
@@ -141,11 +195,6 @@
             넣어도 27장만 복원됐고, 나머지는 시차가 없어 버려졌습니다.
           </p>
         </div>
-        <label class="file" for="file">
-          영상 선택 또는 촬영
-          <span id="fileName">아직 선택하지 않았습니다</span>
-        </label>
-        <input id="file" type="file" accept="video/*" capture="environment" />
       </div>
 
       <div class="card">
@@ -237,6 +286,13 @@ let CAPTURE_QUALITY = 0.58;
       const PATCH = 28;        // 블록 한 변
       const SEARCH = 6;        // 이동 탐색 반경(px)
       const GRID = 3;          // 3×3 블록
+      // 시차 판정 임계값 — 합성 영상 두 개로 보정했다(둘 다 같은 무늬, 같은 속도 계열).
+      //   걷기(가까운 것 9px·먼 것 2px) → ratio 중앙 1.09, 최소 0.71
+      //   회전(전부 5px 균일)          → ratio 중앙 0.13, 최대 0.13
+      // 8배가 벌어져 경계를 잡을 여유가 크다. 0.25 는 회전 최대의 약 2배 위이면서
+      // 완만한 실제 보행(깊이 비 1.7배 ≈ 0.25)도 통과하는 자리다.
+      const PARALLAX_MIN_RATIO = 0.25;  // 전체 이동 대비 잔차 비율
+      const PARALLAX_MIN_PX = 1.2;      // 정수 양자화 잡음(회전에서 1.0)과 구분되는 최소 잔차
 
       /** 프레임을 판정용 그레이스케일 축소본으로. 원본을 들고 있으면 메모리가 터진다. */
       function toTiny(data, w, h) {
@@ -266,38 +322,110 @@ let CAPTURE_QUALITY = 0.58;
         return mx - mn;
       }
 
-      /** 두 프레임 사이 블록별 이동량(SAD 최소 지점). */
-      function blockShifts(a, b) {
+      /** 절반 해상도 축소본. 큰 이동을 좁은 탐색으로 덮기 위해 먼저 여기서 찾는다. */
+      function halfScale(t) {
+        const hw = t.w >> 1, hh = t.h >> 1;
+        const g = new Uint8Array(hw * hh);
+        for (let y = 0; y < hh; y++) {
+          for (let x = 0; x < hw; x++) {
+            const p = y * 2 * t.w + x * 2;
+            g[y * hw + x] = (t.g[p] + t.g[p + 1] + t.g[p + t.w] + t.g[p + t.w + 1]) >> 2;
+          }
+        }
+        return { g, w: hw, h: hh };
+      }
+
+      /**
+       * 화면 전체가 얼마나 흘렀는가(지배적 이동).
+       *
+       * 이걸 먼저 구해야 하는 이유: 블록마다 좁게 찾으면 이동이 탐색 반경을 넘는 순간
+       * 전부 경계에 붙어버려 측정값이 무의미해진다. 실제로 샘플 영상의 "이동량 8.49px" 는
+       * √(6²+6²) — 탐색 창의 모서리에 전부 포화된 값이었다.
+       * 그래서 반값 영상에서 넓게(±24px 상당) 전체 이동을 먼저 찾는다.
+       */
+      function globalShift(a, b) {
+        const ha = halfScale(a), hb = halfScale(b);
+        const R = 12;
+        const px = Math.floor(ha.w * 0.2), py = Math.floor(ha.h * 0.2);
+        const pw = Math.floor(ha.w * 0.6), ph = Math.floor(ha.h * 0.6);
+        let best = Infinity, bx = 0, by = 0;
+        for (let dy = -R; dy <= R; dy++) {
+          for (let dx = -R; dx <= R; dx++) {
+            if (py + dy < 0 || py + ph + dy >= hb.h || px + dx < 0 || px + pw + dx >= hb.w) continue;
+            let sad = 0;
+            for (let y = 0; y < ph; y += 2) {
+              const ra = (py + y) * ha.w + px;
+              const rb = (py + y + dy) * hb.w + px + dx;
+              for (let x = 0; x < pw; x += 2) {
+                const d = ha.g[ra + x] - hb.g[rb + x];
+                sad += d < 0 ? -d : d;
+              }
+            }
+            if (sad < best) { best = sad; bx = dx; by = dy; }
+          }
+        }
+        return { dx: bx * 2, dy: by * 2, saturated: Math.abs(bx) >= R || Math.abs(by) >= R };
+      }
+
+      /**
+       * 블록별 **잔차** — 전체 이동에서 얼마나 벗어났는가. 이게 곧 시차의 크기다.
+       * 제자리 회전이면 모든 블록이 전체 이동과 같이 움직여 잔차가 0 에 붙는다.
+       * 옆으로 걸으면 가까운 블록은 더 많이, 먼 블록은 덜 움직여 잔차가 벌어진다.
+       */
+      function blockResiduals(a, b, cx, cy) {
+        const R = 4;
         const out = [];
         for (let by = 0; by < GRID; by++) {
           for (let bx = 0; bx < GRID; bx++) {
-            const cx = Math.round(((bx + 0.5) * a.w) / GRID - PATCH / 2);
-            const cy = Math.round(((by + 0.5) * a.h) / GRID - PATCH / 2);
-            const x0 = Math.max(SEARCH, Math.min(a.w - PATCH - SEARCH, cx));
-            const y0 = Math.max(SEARCH, Math.min(a.h - PATCH - SEARCH, cy));
-            if (x0 < 0 || y0 < 0) continue;
-            const contrast = patchContrast(a, x0, y0);
-            if (contrast < 25) continue; // 민무늬 — 맞출 기준점이 없다
+            const x0 = Math.round(((bx + 0.5) * a.w) / GRID - PATCH / 2);
+            const y0 = Math.round(((by + 0.5) * a.h) / GRID - PATCH / 2);
+            if (x0 < 0 || y0 < 0 || x0 + PATCH >= a.w || y0 + PATCH >= a.h) continue;
+            // 전체 이동만큼 옮긴 자리가 화면 밖이면 비교할 수 없다.
+            if (x0 + cx - R < 0 || x0 + cx + PATCH + R >= b.w) continue;
+            if (y0 + cy - R < 0 || y0 + cy + PATCH + R >= b.h) continue;
+            if (patchContrast(a, x0, y0) < 25) continue; // 민무늬 — 맞출 기준점이 없다
 
-            let bestSad = Infinity, bdx = 0, bdy = 0;
-            for (let dy = -SEARCH; dy <= SEARCH; dy++) {
-              for (let dx = -SEARCH; dx <= SEARCH; dx++) {
+            let bestSad = Infinity, rdx = 0, rdy = 0;
+            for (let dy = -R; dy <= R; dy++) {
+              for (let dx = -R; dx <= R; dx++) {
                 let sad = 0;
                 for (let y = 0; y < PATCH; y += 2) {
                   const ra = (y0 + y) * a.w + x0;
-                  const rb = (y0 + y + dy) * b.w + x0 + dx;
+                  const rb = (y0 + y + cy + dy) * b.w + x0 + cx + dx;
                   for (let x = 0; x < PATCH; x += 2) {
                     const d = a.g[ra + x] - b.g[rb + x];
                     sad += d < 0 ? -d : d;
                   }
                 }
-                if (sad < bestSad) { bestSad = sad; bdx = dx; bdy = dy; }
+                if (sad < bestSad) { bestSad = sad; rdx = dx; rdy = dy; }
               }
             }
-            out.push({ dx: bdx, dy: bdy });
+            out.push({ dx: rdx, dy: rdy });
           }
         }
         return out;
+      }
+
+      /**
+       * 한 쌍의 촬영 판정 지표.
+       *   motion   — 화면 전체가 흐른 양(px)
+       *   parallax — 블록들이 전체 이동에서 벗어난 평균량(px). 이게 깊이 정보다.
+       *   ratio    — parallax / motion. 얼마나 빠르게 훑든 값이 유지되는 척도.
+       */
+      function pairMetrics(a, b) {
+        const g = globalShift(a, b);
+        const motion = Math.hypot(g.dx, g.dy);
+        const res = blockResiduals(a, b, g.dx, g.dy);
+        if (res.length < 4) return { motion, parallax: 0, ratio: 0, blocks: res.length, saturated: g.saturated };
+        const mags = res.map((r) => Math.hypot(r.dx, r.dy));
+        const parallax = mags.reduce((x, y) => x + y, 0) / mags.length;
+        return {
+          motion,
+          parallax,
+          ratio: motion > 0.5 ? parallax / motion : 0,
+          blocks: res.length,
+          saturated: g.saturated,
+        };
       }
 
       const median = (arr) => {
@@ -324,22 +452,15 @@ let CAPTURE_QUALITY = 0.58;
         let moving = 0, still = 0, rotating = 0, textureless = 0;
         const raw = [];
         for (const [a, b] of samples) {
-          const sh = blockShifts(a, b);
-          if (sh.length < 4) { textureless++; continue; }
-          const mags = sh.map((s) => Math.hypot(s.dx, s.dy));
-          const motion = median(mags);
-          // 편차 = 블록들이 서로 얼마나 다르게 움직였나. 이게 시차의 크기다.
-          const mean = mags.reduce((x, y) => x + y, 0) / mags.length;
-          const spread = Math.sqrt(mags.reduce((x, y) => x + (y - mean) ** 2, 0) / mags.length);
-
-          // 절대 편차가 아니라 **이동량 대비 편차**로 본다. 빠르게 훑든 천천히 훑든,
-          // 회전만 하면 화면이 통째로 같은 양만큼 흐르므로 이 비율이 낮게 유지된다.
-          // 실측(제자리 회전 영상): motion 8.5px 에 spread 0.94px — 비율 0.11.
-          // 옆으로 걸으면 가까운 것과 먼 것의 이동량이 몇 배씩 벌어져 비율이 크게 올라간다.
-          const ratio = motion > 0 ? spread / motion : 0;
-          raw.push({ motion: +motion.toFixed(2), spread: +spread.toFixed(2), ratio: +ratio.toFixed(3) });
-          if (motion < 0.8) still++;
-          else if (ratio >= 0.22 && spread >= 0.8) moving++;
+          const m = pairMetrics(a, b);
+          if (m.blocks < 4) { textureless++; continue; }
+          raw.push({
+            motion: +m.motion.toFixed(2),
+            parallax: +m.parallax.toFixed(2),
+            ratio: +m.ratio.toFixed(3),
+          });
+          if (m.motion < 1.0) still++;
+          else if (m.ratio >= PARALLAX_MIN_RATIO && m.parallax >= PARALLAX_MIN_PX) moving++;
           else rotating++;
         }
         window.__captureRaw = raw;
@@ -664,9 +785,201 @@ let CAPTURE_QUALITY = 0.58;
         })();
       }
 
+      // ── 라이브 촬영 코칭 ────────────────────────────────────────────
+      //
+      // 글로 된 가이드는 읽고도 그대로 제자리에서 돌린다. 찍는 동안 "지금 잘못하고
+      // 있다" 를 즉시 알려주지 않으면 사용자는 끝나고 나서야 실패를 안다.
+      // 그래서 업로드 판정과 **같은 계산**(블록별 이동량 편차 ÷ 이동량)을 미리보기에
+      // 실시간으로 돌려 화면 위에 코칭을 띄운다.
+      //
+      // 영상을 녹화해 다시 프레임을 뽑지 않고, 좋다고 판정된 순간의 프레임을 바로
+      // 모은다 — 인코딩·디코딩을 건너뛰어 화질 손실과 대기 시간이 없다.
+      const LIVE = {
+        TICK_MS: 140,        // 판정 주기
+        GAP: 2,              // 몇 틱 전과 비교할지(인접 프레임은 차이가 잡음에 묻힌다)
+        SHOT_MS: 420,        // 좋은 구간에서 프레임을 담는 간격
+        TARGET: 60,          // 목표 장수(실측에서 정확도 대비 가장 좋았던 수)
+        FAST: 26,            // 이보다 빠르면 흔들림으로 특징점이 사라진다
+        SMOOTH: 4,           // 코칭 문구가 깜빡이지 않게 최근 판정을 모아 다수결
+      };
+
+      const COACH = {
+        START:   { cls: '',     msg: '벽을 향해 카메라를 드세요', sub: '벽에서 2~3m 떨어져 주세요' },
+        STILL:   { cls: 'warn', msg: '움직이세요',               sub: '벽을 보며 옆으로 걸어야 합니다' },
+        ROTATE:  { cls: 'bad',  msg: '제자리에서 돌리지 마세요',   sub: '손목이 아니라 몸이 옆으로 이동해야 합니다' },
+        FAST:    { cls: 'warn', msg: '너무 빠릅니다',             sub: '흔들리면 맞출 기준점이 사라집니다' },
+        FLAT:    { cls: 'warn', msg: '무늬가 없습니다',           sub: '가구·창틀·배관이 화면에 들어오게 하세요' },
+        GOOD:    { cls: 'good', msg: '좋습니다 — 계속 걸으세요',   sub: '같은 속도로 벽을 따라 이동하세요' },
+      };
+
+      let liveState = null;
+
+      function stopLive() {
+        if (!liveState) return;
+        clearInterval(liveState.timer);
+        for (const t of liveState.stream.getTracks()) t.stop();
+        liveState.video.srcObject = null;
+        liveState = null;
+      }
+
+      /** 최근 판정을 모아 가장 많이 나온 것을 고른다 — 한 틱 튀었다고 문구가 바뀌면 읽을 수 없다. */
+      function smooth(history) {
+        const count = {};
+        for (const h of history.slice(-LIVE.SMOOTH)) count[h] = (count[h] ?? 0) + 1;
+        return Object.entries(count).sort((a, b) => b[1] - a[1])[0][0];
+      }
+
+      function setCoach(key, shots) {
+        const c = COACH[key] ?? COACH.START;
+        const el = $('coach');
+        el.className = 'coach ' + c.cls;
+        el.innerHTML = `${c.msg}<span class="sub">${c.sub}</span>`;
+        const pct = Math.min(100, (shots / LIVE.TARGET) * 100);
+        $('camBar').style.width = pct + '%';
+        $('camStats').textContent =
+          `좋은 장면 ${shots} / ${LIVE.TARGET}장` +
+          (shots >= 24 ? ' · 지금 끝내도 복원됩니다' : ' · 24장부터 복원 가능');
+        $('camStop').disabled = shots < 24;
+      }
+
+      async function startLive() {
+        $('camErr').classList.add('hidden');
+        let stream;
+        try {
+          // 후면 카메라 우선. 데스크톱은 그냥 기본 카메라가 잡힌다.
+          stream = await navigator.mediaDevices.getUserMedia({
+            video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920 } },
+            audio: false,
+          });
+        } catch (e) {
+          $('camErr').classList.remove('hidden');
+          $('camErr').innerHTML =
+            '카메라를 열지 못했습니다. 브라우저에서 카메라 권한을 허용해 주세요. ' +
+            '권한을 줄 수 없는 환경이면 위에서 <b>영상 파일 올리기</b>로 바꿔 주세요.';
+          return;
+        }
+
+        const video = $('cam');
+        video.srcObject = stream;
+        await video.play();
+
+        $('camBox').classList.remove('hidden');
+        $('camStart').classList.add('hidden');
+        $('camStop').classList.remove('hidden');
+        $('camStop').disabled = true;
+
+        // 판정용 작은 캔버스와 촬영용 큰 캔버스를 따로 둔다.
+        // 판정은 자주 돌아야 하므로 작게, 촬영은 복원에 쓰이므로 크게.
+        const aCv = document.createElement('canvas');
+        const aCtx = aCv.getContext('2d', { willReadFrequently: true });
+        const sCv = document.createElement('canvas');
+        const sCtx = sCv.getContext('2d');
+
+        liveState = {
+          stream, video, shots: [], tinies: [], history: [], lastShot: 0,
+          timer: null, started: Date.now(),
+        };
+        setCoach('START', 0);
+
+        liveState.timer = setInterval(() => {
+          const st = liveState;
+          if (!st || video.readyState < 2) return;
+          const vw = video.videoWidth, vh = video.videoHeight;
+          if (!vw || !vh) return;
+
+          // 판정용 축소 프레임
+          const ah = Math.max(8, Math.round((TW * vh) / vw));
+          aCv.width = TW; aCv.height = ah;
+          aCtx.drawImage(video, 0, 0, TW, ah);
+          const tiny = { g: null, w: TW, h: ah };
+          const d = aCtx.getImageData(0, 0, TW, ah).data;
+          const g = new Uint8Array(TW * ah);
+          for (let i = 0, p = 0; i < g.length; i++, p += 4) {
+            g[i] = (d[p] * 299 + d[p + 1] * 587 + d[p + 2] * 114) / 1000;
+          }
+          tiny.g = g;
+          st.tinies.push(tiny);
+          if (st.tinies.length > 12) st.tinies.shift();
+
+          const prev = st.tinies[st.tinies.length - 1 - LIVE.GAP];
+          if (!prev) return;
+
+          const m = pairMetrics(prev, tiny);
+          let key;
+          if (m.blocks < 4) key = 'FLAT';
+          else if (m.motion < 1.0) key = 'STILL';
+          else if (m.saturated || m.motion > LIVE.FAST) key = 'FAST';
+          else if (m.ratio >= PARALLAX_MIN_RATIO && m.parallax >= PARALLAX_MIN_PX) key = 'GOOD';
+          else key = 'ROTATE';
+          window.__liveMetrics = m;
+          st.history.push(key);
+          const shown = smooth(st.history);
+          setCoach(shown, st.shots.length);
+
+          // 잘 걷고 있는 순간에만 프레임을 담는다. 제자리 회전 구간을 담으면
+          // 복원되지 않는 프레임만 늘어나 정합률을 끌어내린다.
+          const now = Date.now();
+          if (shown === 'GOOD' && now - st.lastShot >= LIVE.SHOT_MS && st.shots.length < LIVE.TARGET) {
+            st.lastShot = now;
+            const sc = Math.min(1, MAX_EDGE / Math.max(vw, vh));
+            sCv.width = Math.round(vw * sc); sCv.height = Math.round(vh * sc);
+            sCtx.drawImage(video, 0, 0, sCv.width, sCv.height);
+            const b64 = sCv.toDataURL('image/jpeg', CAPTURE_QUALITY).split(',')[1];
+            if (b64) st.shots.push({ base64: b64, timeSec: (now - st.started) / 1000, tiny });
+            setCoach(shown, st.shots.length);
+            if (st.shots.length >= LIVE.TARGET) finishLive();
+          }
+        }, LIVE.TICK_MS);
+      }
+
+      async function finishLive() {
+        if (!liveState) return;
+        const shots = liveState.shots;
+        stopLive();
+        $('camBox').classList.add('hidden');
+        $('camStop').classList.add('hidden');
+        $('camStart').classList.remove('hidden');
+        $('camStart').textContent = '다시 촬영하기';
+
+        if (shots.length < 24) {
+          $('camErr').classList.remove('hidden');
+          $('camErr').textContent =
+            `좋은 장면을 ${shots.length}장만 얻었습니다. 최소 24장이 필요합니다. ` +
+            '벽을 보며 옆으로 걸으면서 30초 이상 다시 촬영해 주세요.';
+          return;
+        }
+
+        // 라이브에서 이미 좋은 구간만 담았지만, 전체를 한 번 더 검증한다.
+        const capture = assessCapture(shots);
+        for (const f of shots) delete f.tiny;
+        const fitted = await fitToBudget(shots, (msg) => setStage(msg, 40));
+
+        if (showCaptureBlock(capture, () => runReconstruct(fitted))) return;
+        await runReconstruct(fitted);
+      }
+
       // ── 흐름 ───────────────────────────────────────────────────────
       const $ = id => document.getElementById(id);
       let picked = null;
+
+      // 모드 전환. 카메라를 못 쓰는 환경(권한 거부·데스크톱 크롬 정책)에서도
+      // 파일 업로드 경로가 그대로 남아 있어야 한다.
+      function setMode(live) {
+        $('modeLive').classList.toggle('on', live);
+        $('modeFile').classList.toggle('on', !live);
+        $('liveWrap').classList.toggle('hidden', !live);
+        $('fileWrap').classList.toggle('hidden', live);
+        $('go').classList.toggle('hidden', live);
+        if (!live) stopLive();
+      }
+      $('modeLive').addEventListener('click', () => setMode(true));
+      $('modeFile').addEventListener('click', () => setMode(false));
+      $('camStart').addEventListener('click', startLive);
+      $('camStop').addEventListener('click', finishLive);
+
+      // 카메라를 아예 쓸 수 없는 브라우저면 파일 모드로 시작한다.
+      if (!navigator.mediaDevices?.getUserMedia) setMode(false);
+      else setMode(true);
 
       $('file').addEventListener('change', e => {
         picked = e.target.files[0] || null;

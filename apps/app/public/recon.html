@@ -251,9 +251,9 @@
         <h2>복원 결과</h2>
         <p class="sub" id="quality"></p>
         <p class="sub" style="margin:-6px 0 10px">
-          <b>방 안에서 둘러보는 시점</b>입니다. 드래그(손가락 하나)로 둘러보고,
-          오른쪽 아래 <b>＋ −</b> 버튼이나 두 손가락·휠로 확대·축소하세요.
-          끝까지 축소하면 공간 전체를 밖에서 볼 수 있습니다.
+          <span id="viewHint"></span>
+          드래그(손가락 하나)로 돌려 보고, 오른쪽 아래 <b>＋ −</b> 버튼이나
+          두 손가락·휠로 확대·축소하세요.
         </p>
         <div id="viewer"></div>
         <div class="stats" id="stats"></div>
@@ -1288,7 +1288,10 @@ let CAPTURE_QUALITY = 0.58;
         // 얼마나 물러날지는 눈대중으로 정하지 않는다. 반지름 viewR 인 구가 시야각
         // 안에 들어오려면 viewR / sin(시야각/2) 만큼 떨어져야 한다. 1.0 배로 뒀더니
         // 어떤 장면은 벽에 코를 박았다(실측). 여유 15% 를 더해 쓴다.
-        const FIT = 1.15 / Math.sin((camera.fov * Math.PI) / 360);
+        // 구가 통째로 들어오는 거리(1/ sin(시야각/2))는 **너무 멀다**. 방은 구가
+        // 아니라 납작한 상자라, 그 거리에 두면 가운데 조각처럼 작게 뜬다(실측).
+        // 0.62 배가 실제 벽이 화면을 채우는 지점이다.
+        const FIT = 0.62 / Math.sin((camera.fov * Math.PI) / 360);
         let back = inside && !built ? 0 : FIT;
         const apply = () => {
           const dx = Math.cos(rx) * Math.sin(ry), dy = Math.sin(rx), dz = Math.cos(rx) * Math.cos(ry);
@@ -1314,6 +1317,15 @@ let CAPTURE_QUALITY = 0.58;
           back = Math.max(-0.4, Math.min(FIT * 4, back + delta));
           apply();
         };
+
+        // 안내 문구는 실제 시점과 맞춰야 한다. 메시가 있으면 가까운 벽을 걷어내고
+        // 밖에서 들여다보는 시점이고, 점군만 있으면 방 안에 서 있는 시점이다.
+        const hint = document.getElementById('viewHint');
+        if (hint) {
+          hint.innerHTML = built
+            ? '<b>가까운 벽을 걷어내고 들여다보는 시점</b>입니다.'
+            : '<b>방 안에서 둘러보는 시점</b>입니다.';
+        }
 
         const el = renderer.domElement;
         // 손가락 두 개면 확대, 하나면 회전. 그래서 포인터를 전부 기억해 둔다.

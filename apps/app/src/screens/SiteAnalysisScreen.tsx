@@ -398,6 +398,13 @@ export function SiteAnalysisScreen() {
     });
   }
 
+  /** 소유자가 본인 건물 평면도를 발급받는 곳(정부24 건축물현황도 열람·발급). */
+  function openOwnerPlanGuide() {
+    void Linking.openURL(
+      'https://www.gov.kr/main?a=AA020InfoCappViewApp&HighCtgCD=A09005&CappBizCD=16130000139',
+    );
+  }
+
   /** 방 입력칸의 가로·세로를 손으로 재는 대신 영상(3D 복원)으로 잰다. */
   function openRoomRecon(index: number, name: string) {
     const q = new URLSearchParams({ room: String(index) });
@@ -1010,6 +1017,24 @@ export function SiteAnalysisScreen() {
                       {m2ToPyeong(sumRoomAreaM2(roomMeasurements()))}평)
                     </Text>
                   ) : null}
+
+                  {/*
+                    소유자 경로. 평면도는 법령상 소유자 본인만 열람할 수 있어 서비스가 대신
+                    받아올 수 없다. 대신 "본인 건물이면 이렇게 받으면 된다" 를 알려 준다 —
+                    도면에 적힌 치수를 그대로 넣는 게 영상 복원보다 정확하다.
+                  */}
+                  <PressableScale
+                    style={styles.ownerNote}
+                    onPress={openOwnerPlanGuide}
+                    accessibilityRole="link"
+                  >
+                    <Text style={styles.ownerNoteText}>
+                      본인 소유 건물인가요? 정부24에서{' '}
+                      <Text style={styles.ownerNoteLink}>건축물현황도(평면도)</Text>를 발급받아
+                      도면의 치수를 그대로 넣으면 가장 정확합니다. 평면도는 법령상 소유자 본인만
+                      열람할 수 있어 서비스가 대신 받아올 수 없습니다.
+                    </Text>
+                  </PressableScale>
                 </View>
               ) : null}
             </View>
@@ -2133,6 +2158,14 @@ const styles = StyleSheet.create({
   },
   roomVideoText: { color: colors.primary, fontSize: 12, fontWeight: '700' },
   roomPlanNote: { color: colors.primary, fontSize: 11, fontWeight: '600', marginTop: 5 },
+  ownerNote: {
+    marginTop: spacing.xs,
+    padding: 9,
+    borderRadius: radius.button,
+    backgroundColor: colors.surface,
+  },
+  ownerNoteText: { color: colors.textMuted, fontSize: 11.5, lineHeight: 16 },
+  ownerNoteLink: { color: colors.primary, fontWeight: '700' },
   roomAddBtn: { alignSelf: 'flex-start', marginTop: 2 },
   roomAddText: { color: colors.primary, fontSize: 12.5, fontWeight: '700' },
   roomTotal: { color: colors.text, fontSize: 13, fontWeight: '700', marginTop: spacing.xs },

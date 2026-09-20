@@ -850,7 +850,10 @@ const SAMPLE = 72, KEEP = 60, MAX_EDGE = 1600;
               `<b>이 도면의 면적은 견적에 쓰지 않습니다.</b> 복원된 점이 ${lastStats.pts.toLocaleString()}개로 ` +
               `부족해(근거율 ${Math.round(lastPlan.wallClosure * 100)}%) 벽이 끊긴 구간을 추측으로 메웠습니다. ` +
               '그런 도면은 면적이 실제보다 <b>작게</b> 나와 견적을 과소하게 만듭니다. ' +
-              '형상 참고용으로만 보시고, 면적이 필요하면 <b>벽을 따라 더 촘촘히 걸으며 다시 촬영</b>해 주세요.';
+              '형상 참고용으로만 보시고, 면적이 필요하면 <b>벽을 따라 더 촘촘히 걸으며 다시 촬영</b>해 주세요. ' +
+              '본인 소유 건물이라면 <a href="https://www.gov.kr/main?a=AA020InfoCappViewApp&HighCtgCD=A09005&CappBizCD=16130000139" ' +
+              'target="_blank" rel="noopener">정부24에서 건축물현황도(평면도)</a>를 발급받아 ' +
+              '도면 치수를 그대로 넣는 편이 가장 정확합니다.';
           }
         }
 

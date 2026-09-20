@@ -659,31 +659,20 @@ export function SiteAnalysisScreen() {
         <FadeInUp delay={120}>
           <View style={styles.pickRow}>
             {Platform.OS !== 'web' ? (
-              <>
-                <PressableScale
-                  style={styles.actionCard}
-                  onPress={takePhoto}
-                  accessibilityRole="button"
-                >
-                  <View style={styles.actionIconCircle}>
-                    <AppIcon name="camera" size={26} color={theme.colors.primary} />
-                  </View>
-                  <Text style={styles.actionCardTitle}>
-                    {images.length > 0 ? '사진 추가 촬영' : '카메라 촬영'}
-                  </Text>
-                  <Text style={styles.actionCardSub}>가이드 따라 여러 장</Text>
-                </PressableScale>
-                <View style={{ width: theme.spacing.sm }} />
-              </>
+              <PressableScale
+                style={styles.actionCard}
+                onPress={takePhoto}
+                accessibilityRole="button"
+              >
+                <View style={styles.actionIconCircle}>
+                  <AppIcon name="camera" size={26} color={theme.colors.primary} />
+                </View>
+                <Text style={styles.actionCardTitle}>
+                  {images.length > 0 ? '사진 추가 촬영' : '카메라 촬영'}
+                </Text>
+                <Text style={styles.actionCardSub}>가이드 따라 여러 장</Text>
+              </PressableScale>
             ) : null}
-
-            <PressableScale style={styles.actionCard} onPress={pickFromLibrary} accessibilityRole="button">
-              <View style={styles.actionIconCircle}>
-                <AppIcon name="document" size={26} color={theme.colors.primary} />
-              </View>
-              <Text style={styles.actionCardTitle}>이미 찍은 사진 올리기</Text>
-              <Text style={styles.actionCardSub}>앨범에서 여러 장 선택</Text>
-            </PressableScale>
           </View>
         </FadeInUp>
 

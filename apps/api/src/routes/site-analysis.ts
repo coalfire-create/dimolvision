@@ -20,7 +20,7 @@ import {
   findMissingSegments,
   reconQuality,
   scaleDimensions,
-  type ReconstructionClient,
+  type ReconstructionChain,
   type ScaleReference,
 } from '../recon/reconstruction.js';
 import {
@@ -55,7 +55,7 @@ export interface SiteAnalysisRouterOptions {
    */
   cache?: AnalysisCacheStore;
   /** 3D 복원 클라이언트(선택). 없으면 복원 엔드포인트가 503 을 낸다. */
-  recon?: ReconstructionClient;
+  recon?: ReconstructionChain;
   /** 좌표 → 지번 변환(선택). 지도에서 주소를 찍는 기능에 쓴다. */
   parcel?: ParcelLookupClient;
   /** 공급자 1곳당 시도 횟수(1 = 재시도 없음). 기본 2 — 일시적 429/503 을 한 번 더 받아준다. */

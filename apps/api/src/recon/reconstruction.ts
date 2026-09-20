@@ -113,6 +113,39 @@ export interface ReconstructionConfig {
   apiKey?: string;
 }
 
+/**
+ * 복원 공급자를 우선순위로 시도한다.
+ *
+ * 왜 둘을 두는가: COLMAP(SfM)은 사진에서 같은 지점을 찾아 맞추는 방식이라 맞출 무늬가
+ * 없으면 원리적으로 실패한다. 철거 현장의 도배·페인트 벽이 정확히 그 조건이고,
+ * 실측에서 "매칭 990개·45장 전부 연결" 인데도 초기 쌍을 못 찾아 모델이 아예 생기지
+ * 않는 실패를 반복했다. VGGT 는 신경망이 한 번의 추론으로 포즈와 깊이를 함께 내므로
+ * 그 실패 모드가 없다. 그래서 VGGT 를 먼저 쓰고, 그쪽이 죽었을 때만 COLMAP 으로 간다.
+ */
+export class ReconstructionChain {
+  constructor(private readonly providers: ReconstructionClient[]) {}
+
+  async warmup(): Promise<void> {
+    await Promise.all(this.providers.map((p) => p.warmup()));
+  }
+
+  async reconstruct(frames: string[]): Promise<ReconstructionResponse> {
+    let last: ReconstructionResponse = {
+      ok: false,
+      stage: 'input',
+      log: '복원 공급자가 없습니다.',
+    };
+    for (const provider of this.providers) {
+      const r = await provider.reconstruct(frames);
+      if (r.ok) return r;
+      last = r;
+      // 입력 자체가 모자란 건 다음 공급자로 가도 같다.
+      if (r.stage === 'input') return r;
+    }
+    return last;
+  }
+}
+
 export class ReconstructionClient {
   constructor(private readonly config: ReconstructionConfig) {}
 

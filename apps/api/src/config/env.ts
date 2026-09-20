@@ -63,6 +63,12 @@ export const env = {
     baseUrl: process.env.RECON_BASE_URL,
     timeoutMs: Number(process.env.RECON_TIMEOUT_MS ?? 600_000),
     apiKey: process.env.RECON_API_KEY,
+    /**
+     * VGGT(feed-forward 3D) 서비스. 있으면 이쪽을 먼저 쓴다 — 특징점 매칭이 없어
+     * 무늬 없는 벽에서도 실패하지 않는다. COLMAP 은 그 뒤 폴백으로 남는다.
+     */
+    vggtBaseUrl: process.env.VGGT_BASE_URL,
+    vggtTimeoutMs: Number(process.env.VGGT_TIMEOUT_MS ?? 600_000),
   },
   /**
    * 공공데이터포털 인증키(건축물대장). 없으면 공공데이터 보강 없이 사진만으로 분석한다.

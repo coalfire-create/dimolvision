@@ -20,7 +20,7 @@ import {
   createRegisterCache,
   type AnalysisCacheStore,
 } from './cache/analysis-cache.js';
-import { ReconstructionClient } from './recon/reconstruction.js';
+import { ReconstructionChain, ReconstructionClient } from './recon/reconstruction.js';
 import { ParcelLookupClient } from './geo/parcel.js';
 
 /**
@@ -141,13 +141,27 @@ export function createApp() {
   };
 
   // 3D 복원은 GPU 서비스가 설정됐을 때만 켠다(없으면 엔드포인트가 503 을 낸다).
-  const recon = env.recon.baseUrl
-    ? new ReconstructionClient({
+  // VGGT 를 먼저, COLMAP 을 폴백으로. 둘 다 없으면 복원 엔드포인트가 503 을 낸다.
+  const reconProviders: ReconstructionClient[] = [];
+  if (env.recon.vggtBaseUrl) {
+    reconProviders.push(
+      new ReconstructionClient({
+        baseUrl: env.recon.vggtBaseUrl,
+        timeoutMs: env.recon.vggtTimeoutMs,
+        ...(env.recon.apiKey ? { apiKey: env.recon.apiKey } : {}),
+      }),
+    );
+  }
+  if (env.recon.baseUrl) {
+    reconProviders.push(
+      new ReconstructionClient({
         baseUrl: env.recon.baseUrl,
         timeoutMs: env.recon.timeoutMs,
-        apiKey: env.recon.apiKey,
-      })
-    : undefined;
+        ...(env.recon.apiKey ? { apiKey: env.recon.apiKey } : {}),
+      }),
+    );
+  }
+  const recon = reconProviders.length > 0 ? new ReconstructionChain(reconProviders) : undefined;
 
   // 지도에서 찍은 좌표를 지번으로 옮기는 변환(키가 있을 때만).
   const parcel = env.kakao.restApiKey

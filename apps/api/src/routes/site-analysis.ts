@@ -148,13 +148,21 @@ export function createSiteAnalysisRouter(
     const sigunguCd = typeof body.sigunguCd === 'string' ? body.sigunguCd : undefined;
     const bjdongCd = typeof body.bjdongCd === 'string' ? body.bjdongCd : undefined;
     if (!registry || !sigunguCd || !bjdongCd) return undefined;
-    return registry.lookup({
+    const query = {
       sigunguCd,
       bjdongCd,
       bun: typeof body.bun === 'string' ? body.bun : undefined,
       ji: typeof body.ji === 'string' ? body.ji : undefined,
       platGbCd: typeof body.platGbCd === 'string' ? body.platGbCd : undefined,
-    });
+    };
+    // 표제부(건물 전체)와 층별개요(층마다 면적)를 함께 받는다. 부분 철거에서는 연면적이
+    // 아니라 해당 층 면적이 대상 범위라, 층 목록이 있어야 사용자가 범위를 고를 수 있다.
+    const [info, floors] = await Promise.all([
+      registry.lookup(query),
+      registry.lookupFloors(query),
+    ]);
+    if (!info) return undefined;
+    return floors.length > 0 ? { ...info, floors } : info;
   }
 
   /** 대장에서 얻은 값을 분석 입력의 힌트로 채운다(사용자가 직접 준 값이 있으면 그것을 존중). */
@@ -435,6 +443,33 @@ export function createSiteAnalysisRouter(
       ...(floorPlan ? { floorPlan } : {}),
       ...(floorPlanScaled ? { floorPlanScaled } : {}),
     });
+  });
+
+  /**
+   * GET /api/building-register?sigunguCd=&bjdongCd=&bun=&ji=
+   *
+   * 주소를 찍은 직후 대장을 먼저 보여 주기 위한 조회. 분석을 한 번 돌려야 층 목록이
+   * 나오면, 정작 "어느 층을 철거할 건가" 를 고르기 전에 이미 틀린 범위로 분석한 뒤가 된다.
+   */
+  router.get('/building-register', async (req, res) => {
+    if (!registry) {
+      res
+        .status(503)
+        .json({ error: '건축물대장 조회가 설정되지 않았습니다(DATA_GO_KR_SERVICE_KEY).' });
+      return;
+    }
+    const q = req.query as Record<string, unknown>;
+    const found = await lookupRegister({
+      sigunguCd: typeof q.sigunguCd === 'string' ? q.sigunguCd : undefined,
+      bjdongCd: typeof q.bjdongCd === 'string' ? q.bjdongCd : undefined,
+      bun: typeof q.bun === 'string' ? q.bun : undefined,
+      ji: typeof q.ji === 'string' ? q.ji : undefined,
+    });
+    if (!found) {
+      res.status(404).json({ error: '해당 지번의 건축물대장을 찾지 못했습니다.' });
+      return;
+    }
+    res.json(found);
   });
 
   /**

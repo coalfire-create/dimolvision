@@ -29,6 +29,30 @@ export interface BuildingRegisterInfo {
   mainUse?: string;
   /** 건물명(있을 때). */
   buildingName?: string;
+  /** 층별개요(조회됐을 때). 부분 철거에서 대상 층을 고르는 근거가 된다. */
+  floors?: BuildingFloor[];
+}
+
+/**
+ * 층별개요 한 줄 — 층 하나의 바닥면적·구조·용도.
+ *
+ * 왜 필요한가: 표제부의 연면적은 **건물 전체**다. "3층만 철거" 처럼 대상이 건물의 일부면
+ * 연면적을 쓰는 순간 물량이 통째로 틀린다. 층별개요는 그 층의 면적을 대장 등재값으로
+ * 알려 주므로, 사진 눈대중이나 영상 복원보다 확실한 근거가 된다.
+ */
+export interface BuildingFloor {
+  /** 동 이름(한 지번에 여러 동이 있을 때 구분용). */
+  dongName?: string;
+  /** 지상/지하 구분. */
+  floorGroup?: string;
+  /** 층 이름(예: 1층, 지하1층). 대장 표기 그대로 쓴다. */
+  floorName: string;
+  /** 그 층의 바닥면적(㎡). */
+  areaM2: number;
+  /** 층 주구조명. */
+  structureName?: string;
+  /** 층 주용도(예: 사무소, 근린생활시설). */
+  mainUse?: string;
 }
 
 export interface BuildingRegisterQuery {
@@ -85,7 +109,15 @@ const DEFAULT_BASE_URL = 'https://apis.data.go.kr/1613000/BldRgstHubService';
 export class BuildingRegisterClient {
   constructor(private readonly config: BuildingRegisterConfig) {}
 
-  async lookup(q: BuildingRegisterQuery): Promise<BuildingRegisterInfo | undefined> {
+  /**
+   * 대장 서비스의 한 엔드포인트를 조회해 항목 배열로 돌려준다.
+   * 표제부·층별개요가 같은 파라미터·같은 응답 봉투를 쓰므로 여기서 한 번만 만든다.
+   */
+  private async fetchItems<T>(
+    endpoint: string,
+    q: BuildingRegisterQuery,
+    numOfRows: number,
+  ): Promise<T[]> {
     const base = this.config.baseUrl ?? DEFAULT_BASE_URL;
     const params = new URLSearchParams({
       serviceKey: this.config.serviceKey,
@@ -95,38 +127,59 @@ export class BuildingRegisterClient {
       bun: (q.bun ?? '0').padStart(4, '0'),
       ji: (q.ji ?? '0').padStart(4, '0'),
       _type: 'json',
-      numOfRows: '20',
+      numOfRows: String(numOfRows),
       pageNo: '1',
     });
 
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), this.config.timeoutMs);
     try {
-      const res = await fetch(`${base}/getBrTitleInfo?${params.toString()}`, {
+      const res = await fetch(`${base}/${endpoint}?${params.toString()}`, {
         signal: controller.signal,
       });
-      if (!res.ok) return undefined;
-      const body = (await res.json()) as PublicDataResponse;
-      const items = normalizeItems(body);
-      if (items.length === 0) return undefined;
-
-      const best = items.reduce((a, b) => (num(b.totArea) > num(a.totArea) ? b : a));
-      const structureName = best.strctCdNm?.trim() || undefined;
-      return {
-        structureName,
-        structure: toBuildingStructure(structureName),
-        totalFloorAreaM2: num(best.totArea) || undefined,
-        floorsAbove: num(best.grndFlrCnt) || undefined,
-        approvedYear: parseApprovedYear(best.useAprDay),
-        mainUse: best.mainPurpsCdNm?.trim() || undefined,
-        buildingName: best.bldNm?.trim() || undefined,
-      };
+      if (!res.ok) return [];
+      return normalizeItems((await res.json()) as PublicDataResponse<T>);
     } catch {
       // 공공데이터는 장애·쿼터가 잦다. 없으면 없는 대로 분석을 진행한다.
-      return undefined;
+      return [];
     } finally {
       clearTimeout(timer);
     }
+  }
+
+  /**
+   * 층별개요 조회. 층이 많은 건물도 한 번에 받도록 넉넉히 요청한다.
+   * 면적이 0 이하인 줄(옥탑·승강기탑 등 면적 미기재)은 버린다 — 고르게 해도 쓸 값이 없다.
+   */
+  async lookupFloors(q: BuildingRegisterQuery): Promise<BuildingFloor[]> {
+    const items = await this.fetchItems<BrFloorItem>('getBrFlrOulnInfo', q, 200);
+    return items
+      .map((it) => ({
+        dongName: it.dongNm?.trim() || undefined,
+        floorGroup: it.flrGbCdNm?.trim() || undefined,
+        floorName: it.flrNoNm?.trim() || '',
+        areaM2: num(it.area),
+        structureName: it.strctCdNm?.trim() || undefined,
+        mainUse: it.mainPurpsCdNm?.trim() || undefined,
+      }))
+      .filter((f) => f.floorName !== '' && f.areaM2 > 0);
+  }
+
+  async lookup(q: BuildingRegisterQuery): Promise<BuildingRegisterInfo | undefined> {
+    const items = await this.fetchItems<BrTitleItem>('getBrTitleInfo', q, 20);
+    if (items.length === 0) return undefined;
+
+    const best = items.reduce((a, b) => (num(b.totArea) > num(a.totArea) ? b : a));
+    const structureName = best.strctCdNm?.trim() || undefined;
+    return {
+      structureName,
+      structure: toBuildingStructure(structureName),
+      totalFloorAreaM2: num(best.totArea) || undefined,
+      floorsAbove: num(best.grndFlrCnt) || undefined,
+      approvedYear: parseApprovedYear(best.useAprDay),
+      mainUse: best.mainPurpsCdNm?.trim() || undefined,
+      buildingName: best.bldNm?.trim() || undefined,
+    };
   }
 }
 
@@ -140,12 +193,22 @@ interface BrTitleItem {
   bldNm?: string;
 }
 
-interface PublicDataResponse {
-  response?: { body?: { items?: { item?: BrTitleItem | BrTitleItem[] } | '' } };
+/** 층별개요 응답에서 쓰는 필드만. */
+interface BrFloorItem {
+  dongNm?: string;
+  flrGbCdNm?: string;
+  flrNoNm?: string;
+  area?: string | number;
+  strctCdNm?: string;
+  mainPurpsCdNm?: string;
+}
+
+interface PublicDataResponse<T> {
+  response?: { body?: { items?: { item?: T | T[] } | '' } };
 }
 
 /** item 은 0건이면 빈 문자열, 1건이면 객체, 여러 건이면 배열로 온다. */
-function normalizeItems(body: PublicDataResponse): BrTitleItem[] {
+function normalizeItems<T>(body: PublicDataResponse<T>): T[] {
   const items = body.response?.body?.items;
   if (!items || typeof items !== 'object' || !items.item) return [];
   return Array.isArray(items.item) ? items.item : [items.item];

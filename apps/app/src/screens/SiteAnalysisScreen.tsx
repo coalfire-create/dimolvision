@@ -35,6 +35,8 @@ import {
   ApiError,
   analyzeSite,
   analyzeSiteWasteItems,
+  lookupBuildingRegister,
+  type BuildingFloor,
   type BuildingRegisterInfo,
 } from '../api/client';
 import { AppIcon } from '../components/AppIcon';
@@ -262,8 +264,10 @@ interface RoomRow {
   name: string;
   length: string;
   width: string;
-  /** 평면도 윤곽 면적(㎡). 가로·세로를 손으로 고치면 근거가 어긋나므로 그때 버린다. */
+  /** 확정 면적(㎡). 가로·세로를 손으로 고치면 근거가 어긋나므로 그때 버린다. */
   areaM2?: number;
+  /** 그 면적이 어디서 왔는지 — 화면에 근거를 그대로 적기 위해. */
+  areaSource?: 'PLAN' | 'REGISTER';
 }
 
 function mimeFromUri(uri: string): string {
@@ -322,12 +326,58 @@ export function SiteAnalysisScreen() {
           name: row.name || roomMeasurement.name,
           length: String(roomMeasurement.lengthM),
           width: String(roomMeasurement.widthM),
-          ...(roomMeasurement.areaM2 !== undefined ? { areaM2: roomMeasurement.areaM2 } : {}),
+          ...(roomMeasurement.areaM2 !== undefined
+            ? { areaM2: roomMeasurement.areaM2, areaSource: 'PLAN' as const }
+            : {}),
         };
         return next;
       });
     }
   }, []);
+
+  // 주소를 찍으면 곧바로 대장을 조회한다 — 층 목록을 먼저 보여 줘야 "어느 층을 철거하는지"
+  // 를 고르고 분석할 수 있다. 분석 후에 알려 주면 이미 틀린 범위로 돌린 뒤다.
+  useEffect(() => {
+    if (!parcel) return;
+    let live = true;
+    lookupBuildingRegister(parcel)
+      .then((info) => {
+        if (live) setRegister(info);
+      })
+      .catch(() => {
+        // 키가 없거나 대장에 없는 지번이면 조용히 넘어간다 — 분석은 그대로 된다.
+      });
+    return () => {
+      live = false;
+    };
+  }, [parcel]);
+
+  /**
+   * 대장에 등재된 층 면적을 철거 대상 범위로 넣거나 뺀다.
+   * 층 면적은 등재값이라 사진 눈대중이나 영상 복원보다 확실하다 — 실측과 같은 자격으로 쓴다.
+   */
+  function toggleFloor(floor: BuildingFloor) {
+    setRoomsMode(true);
+    setRooms((prev) => {
+      const without = prev.filter((r) => r.name !== floor.floorName || r.areaM2 !== floor.areaM2);
+      if (without.length !== prev.length) {
+        // 이미 담긴 층을 다시 누르면 뺀다. 전부 빠지면 빈 줄 하나는 남겨 둔다.
+        return without.length > 0 ? without : [{ name: '', length: '', width: '' }];
+      }
+      const added = [
+        ...prev,
+        {
+          name: floor.floorName,
+          length: '',
+          width: '',
+          areaM2: floor.areaM2,
+          areaSource: 'REGISTER' as const,
+        },
+      ];
+      // 사용자가 손대지 않은 빈 줄은 정리한다.
+      return added.filter((r) => r.name.trim() !== '' || r.length !== '' || r.width !== '');
+    });
+  }
 
   /** 방 입력칸의 가로·세로를 손으로 재는 대신 영상(3D 복원)으로 잰다. */
   function openRoomRecon(index: number, name: string) {
@@ -410,7 +460,10 @@ export function SiteAnalysisScreen() {
         if (i !== index) return r;
         const next = { ...r, ...patch };
         // 가로·세로를 손으로 고치면 평면도 면적은 더 이상 그 방을 설명하지 않는다 — 버린다.
-        if (patch.length !== undefined || patch.width !== undefined) delete next.areaM2;
+        if (patch.length !== undefined || patch.width !== undefined) {
+          delete next.areaM2;
+          delete next.areaSource;
+        }
         return next;
       }),
     );
@@ -451,7 +504,8 @@ export function SiteAnalysisScreen() {
         ...addr,
         ...(year ? { buildingYear: year } : {}),
       });
-      setRegister((r as { buildingRegister?: BuildingRegisterInfo }).buildingRegister ?? null);
+      const found = (r as { buildingRegister?: BuildingRegisterInfo }).buildingRegister;
+      if (found) setRegister(found);
       setResult(r);
       return;
     }
@@ -462,7 +516,8 @@ export function SiteAnalysisScreen() {
       ...(structure ? { structure } : {}),
       ...(year ? { buildingYear: year } : {}),
     });
-    setRegister(r.buildingRegister ?? null);
+    // 응답에 대장이 없다고 이미 조회해 둔 값을 지우면 층 선택 칩이 통째로 사라진다.
+    if (r.buildingRegister) setRegister(r.buildingRegister);
     setEstimate(r.estimate ?? null);
     setCost(r.cost ?? null);
     setResult(r.analysis);
@@ -719,6 +774,40 @@ export function SiteAnalysisScreen() {
                 ))}
               </View>
             ) : null}
+
+            {/* 층별개요 — 건물 일부만 철거할 때, 연면적이 아니라 이 층 면적이 대상 범위다. */}
+            {register?.floors && register.floors.length > 0 ? (
+              <View style={styles.floorBox}>
+                <Text style={styles.floorTitle}>철거 대상 층 (선택)</Text>
+                <Text style={styles.floorSub}>
+                  일부 층만 철거한다면 해당 층을 고르세요. 건축물대장에 등재된 면적이라 직접 재지
+                  않아도 됩니다. 건물 전체 철거면 고르지 않아도 됩니다.
+                </Text>
+                <View style={styles.floorRow}>
+                  {register.floors.map((f, i) => {
+                    const on = rooms.some((r) => r.name === f.floorName && r.areaM2 === f.areaM2);
+                    return (
+                      <PressableScale
+                        key={`${f.floorName}-${i}`}
+                        style={[styles.floorChip, on && styles.floorChipOn]}
+                        onPress={() => toggleFloor(f)}
+                        accessibilityRole="button"
+                        accessibilityState={{ selected: on }}
+                        accessibilityLabel={`${f.floorName} ${f.areaM2}제곱미터 ${on ? '선택됨' : ''}`}
+                      >
+                        <Text style={[styles.floorChipName, on && styles.floorChipTextOn]}>
+                          {f.floorName}
+                        </Text>
+                        <Text style={[styles.floorChipArea, on && styles.floorChipTextOn]}>
+                          {f.areaM2}㎡
+                        </Text>
+                      </PressableScale>
+                    );
+                  })}
+                </View>
+              </View>
+            ) : null}
+
             <PressableScale style={styles.addrBtn} onPress={openMap} accessibilityRole="button">
               <Text style={styles.addrBtnText}>
                 {parcel ? '주소 다시 선택' : '지도에서 현장 선택'}
@@ -868,7 +957,10 @@ export function SiteAnalysisScreen() {
                       </View>
                       {r.areaM2 !== undefined ? (
                         <Text style={styles.roomPlanNote}>
-                          평면도 윤곽 {r.areaM2}㎡ 적용 — 가로·세로를 고치면 이 값은 해제됩니다
+                          {r.areaSource === 'REGISTER'
+                            ? `건축물대장 등재 면적 ${r.areaM2}㎡ 적용`
+                            : `평면도 윤곽 ${r.areaM2}㎡ 적용`}
+                          {' — 가로·세로를 고치면 이 값은 해제됩니다'}
                         </Text>
                       ) : null}
                     </View>
@@ -1848,6 +1940,30 @@ const styles = StyleSheet.create({
   addrValue: { color: colors.text, fontSize: font.body, fontWeight: '700', marginTop: 6 },
   addrCodes: { color: colors.textMuted, fontSize: 12, marginTop: 2 },
   regRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: spacing.sm },
+
+  /* 층별개요 — 철거 대상 층 고르기 */
+  floorBox: {
+    marginTop: spacing.sm,
+    paddingTop: spacing.xs,
+    borderTopWidth: 1,
+    borderTopColor: colors.border,
+  },
+  floorTitle: { color: colors.text, fontSize: 13, fontWeight: '800' },
+  floorSub: { color: colors.textMuted, fontSize: 12, lineHeight: 17, marginTop: 3 },
+  floorRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: spacing.xs },
+  floorChip: {
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+    borderRadius: radius.button,
+    borderWidth: 1.5,
+    borderColor: colors.border,
+    backgroundColor: colors.background,
+    alignItems: 'center',
+  },
+  floorChipOn: { borderColor: colors.primary, backgroundColor: colors.primarySoft },
+  floorChipName: { color: colors.text, fontSize: 12.5, fontWeight: '800' },
+  floorChipArea: { color: colors.textMuted, fontSize: 11, marginTop: 1 },
+  floorChipTextOn: { color: colors.primary },
   regChip: {
     backgroundColor: colors.primarySoft,
     borderRadius: radius.button,

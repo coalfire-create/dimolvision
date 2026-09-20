@@ -72,6 +72,16 @@ export const analyzeSite = (input: {
   rooms?: RoomMeasurement[];
 }) => api<SiteAnalysis>('/site-analysis/analyze', { method: 'POST', body: JSON.stringify(input) });
 
+/** 층별개요 한 줄 — 그 층의 바닥면적을 대장 등재값으로 알려 준다. */
+export interface BuildingFloor {
+  dongName?: string;
+  floorGroup?: string;
+  floorName: string;
+  areaM2: number;
+  structureName?: string;
+  mainUse?: string;
+}
+
 /** 건축물대장 조회 결과(주소 코드를 보냈을 때만 온다). */
 export interface BuildingRegisterInfo {
   structureName?: string;
@@ -80,7 +90,28 @@ export interface BuildingRegisterInfo {
   approvedYear?: number;
   mainUse?: string;
   buildingName?: string;
+  /** 층별개요. 건물 일부만 철거할 때 대상 층을 고르는 근거. */
+  floors?: BuildingFloor[];
 }
+
+/**
+ * 지번으로 건축물대장을 미리 조회한다(주소를 찍은 직후).
+ * 층 목록을 먼저 보여 줘야 사용자가 "어느 층을 철거하는지" 를 고르고 분석할 수 있다.
+ */
+export const lookupBuildingRegister = (q: {
+  sigunguCd: string;
+  bjdongCd: string;
+  bun?: string;
+  ji?: string;
+}) =>
+  api<BuildingRegisterInfo>(
+    `/building-register?${new URLSearchParams({
+      sigunguCd: q.sigunguCd,
+      bjdongCd: q.bjdongCd,
+      ...(q.bun ? { bun: q.bun } : {}),
+      ...(q.ji ? { ji: q.ji } : {}),
+    }).toString()}`,
+  );
 
 export interface PhotoWasteItemsResult {
   analysis: SiteAnalysis;

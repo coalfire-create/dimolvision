@@ -109,10 +109,104 @@ describe('BuildingRegisterClient', () => {
   });
 
   it('공공데이터 장애(5xx·네트워크)면 undefined 로 떨어져 분석을 막지 않는다', async () => {
-    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false, status: 500, json: async () => ({}) })));
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => ({ ok: false, status: 500, json: async () => ({}) })),
+    );
     expect(await client().lookup({ sigunguCd: '11110', bjdongCd: '10100' })).toBeUndefined();
 
-    vi.stubGlobal('fetch', vi.fn(async () => { throw new Error('network'); }));
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => {
+        throw new Error('network');
+      }),
+    );
     expect(await client().lookup({ sigunguCd: '11110', bjdongCd: '10100' })).toBeUndefined();
+  });
+});
+
+describe('lookupFloors — 층별개요', () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  const client = () =>
+    new BuildingRegisterClient({ serviceKey: 'k', timeoutMs: 1000, baseUrl: 'https://api.test' });
+  const q = { sigunguCd: '11110', bjdongCd: '10300', bun: '1', ji: '2' };
+  const respond = (item: unknown) =>
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => ({
+        ok: true,
+        json: async () => ({ response: { body: { items: { item } } } }),
+      })),
+    );
+
+  it('층마다 이름·면적·구조·용도를 뽑는다', async () => {
+    respond([
+      {
+        flrGbCdNm: '지하',
+        flrNoNm: '지하1층',
+        area: '85.5',
+        strctCdNm: '철근콘크리트구조',
+        mainPurpsCdNm: '주차장',
+      },
+      {
+        flrGbCdNm: '지상',
+        flrNoNm: '1층',
+        area: '120.3',
+        strctCdNm: '철근콘크리트구조',
+        mainPurpsCdNm: '근린생활시설',
+      },
+    ]);
+    const floors = await client().lookupFloors(q);
+    expect(floors).toHaveLength(2);
+    expect(floors[0]).toMatchObject({
+      floorName: '지하1층',
+      areaM2: 85.5,
+      floorGroup: '지하',
+      mainUse: '주차장',
+    });
+    expect(floors[1]!.areaM2).toBe(120.3);
+  });
+
+  it('한 층만 있으면 객체로 오는데도 배열로 돌려준다', async () => {
+    respond({ flrNoNm: '1층', area: '60' });
+    expect(await client().lookupFloors(q)).toHaveLength(1);
+  });
+
+  it('면적이 없거나 0인 줄은 버린다 — 쓸 값이 없다', async () => {
+    respond([
+      { flrNoNm: '1층', area: '60' },
+      { flrNoNm: '옥탑1층', area: '0' },
+      { flrNoNm: '옥탑2층' },
+    ]);
+    const floors = await client().lookupFloors(q);
+    expect(floors.map((f) => f.floorName)).toEqual(['1층']);
+  });
+
+  it('층 이름이 없는 줄도 버린다 — 사용자에게 보여 줄 수 없다', async () => {
+    respond([{ area: '60' }, { flrNoNm: '2층', area: '70' }]);
+    expect((await client().lookupFloors(q)).map((f) => f.floorName)).toEqual(['2층']);
+  });
+
+  it('조회가 실패해도 빈 배열 — 분석을 막지 않는다', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => ({ ok: false, status: 500, json: async () => ({}) })),
+    );
+    expect(await client().lookupFloors(q)).toEqual([]);
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => {
+        throw new Error('down');
+      }),
+    );
+    expect(await client().lookupFloors(q)).toEqual([]);
+  });
+
+  it('층별개요 엔드포인트를 부른다', async () => {
+    const f = vi.fn(async () => ({ ok: true, json: async () => ({}) }));
+    vi.stubGlobal('fetch', f);
+    await client().lookupFloors(q);
+    expect(String(f.mock.calls[0]?.[0])).toContain('getBrFlrOulnInfo');
   });
 });

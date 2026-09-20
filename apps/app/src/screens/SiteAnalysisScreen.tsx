@@ -619,9 +619,9 @@ export function SiteAnalysisScreen() {
                 <Image source={brandmark} style={styles.dropzoneLogo} resizeMode="contain" />
               </View>
               <View style={{ flex: 1 }}>
-                <Text style={styles.dropzoneTitle}>직접 촬영한 사진도 분석</Text>
+                <Text style={styles.dropzoneTitle}>직접 촬영한 현장도 분석</Text>
                 <Text style={styles.dropzoneSub}>
-                  건물 내부·지붕·자재가 잘 보이게 촬영할수록 정확합니다
+                  영상으로 찍으면 소재 분석에 더해 3D 복원과 면적·부피까지 나옵니다
                 </Text>
               </View>
             </View>
@@ -638,35 +638,51 @@ export function SiteAnalysisScreen() {
             <View style={styles.videoBadge}>
               <Text style={styles.videoBadgeText}>권장</Text>
             </View>
-            <Text style={styles.videoTitle}>영상으로 촬영</Text>
+            <Text style={styles.videoTitle}>영상으로 촬영하기</Text>
             <Text style={styles.videoSub}>
               벽을 따라 걸으며 한 번 찍으면 소재 분석·견적에 더해 3D 복원과 면적·부피까지
               나옵니다. 찍는 동안 화면이 실시간으로 촬영을 봐 줍니다.
             </Text>
+            <View style={styles.videoCta}>
+              <AppIcon name="camera" size={18} color="#0F172A" />
+              <Text style={styles.videoCtaText}>카메라 열기</Text>
+            </View>
           </PressableScale>
         </FadeInUp>
 
-        {/* 사진만 필요할 때의 경로. */}
+        {/*
+          이미 찍어둔 사진이 있을 때의 경로.
+          웹에서는 사진 촬영 버튼을 두지 않는다 — 위의 영상 촬영과 나란히 있으면
+          무엇을 눌러야 하는지 알 수 없고, 사진만 찍으면 3D·부피가 나오지 않는다.
+          네이티브 앱에는 /recon.html 이 없으므로 사진 촬영을 그대로 남긴다.
+        */}
         <FadeInUp delay={120}>
           <View style={styles.pickRow}>
-            <PressableScale style={styles.actionCard} onPress={takePhoto} accessibilityRole="button">
-              <View style={styles.actionIconCircle}>
-                <AppIcon name="camera" size={26} color={theme.colors.primary} />
-              </View>
-              <Text style={styles.actionCardTitle}>
-                {images.length > 0 ? '사진 추가 촬영' : '카메라 촬영'}
-              </Text>
-              <Text style={styles.actionCardSub}>가이드 따라 여러 장</Text>
-            </PressableScale>
-            
-            <View style={{ width: theme.spacing.sm }} />
+            {Platform.OS !== 'web' ? (
+              <>
+                <PressableScale
+                  style={styles.actionCard}
+                  onPress={takePhoto}
+                  accessibilityRole="button"
+                >
+                  <View style={styles.actionIconCircle}>
+                    <AppIcon name="camera" size={26} color={theme.colors.primary} />
+                  </View>
+                  <Text style={styles.actionCardTitle}>
+                    {images.length > 0 ? '사진 추가 촬영' : '카메라 촬영'}
+                  </Text>
+                  <Text style={styles.actionCardSub}>가이드 따라 여러 장</Text>
+                </PressableScale>
+                <View style={{ width: theme.spacing.sm }} />
+              </>
+            ) : null}
 
             <PressableScale style={styles.actionCard} onPress={pickFromLibrary} accessibilityRole="button">
               <View style={styles.actionIconCircle}>
                 <AppIcon name="document" size={26} color={theme.colors.primary} />
               </View>
-              <Text style={styles.actionCardTitle}>앨범에서 선택</Text>
-              <Text style={styles.actionCardSub}>여러 장 선택 가능</Text>
+              <Text style={styles.actionCardTitle}>이미 찍은 사진 올리기</Text>
+              <Text style={styles.actionCardSub}>앨범에서 여러 장 선택</Text>
             </PressableScale>
           </View>
         </FadeInUp>
@@ -1731,6 +1747,17 @@ const styles = StyleSheet.create({
   videoBadgeText: { color: '#6EE7B7', fontSize: 11, fontWeight: '800' },
   videoTitle: { color: '#F8FAFC', fontSize: font.bodyLarge, fontWeight: '800' },
   videoSub: { color: '#94A3B8', fontSize: 13, lineHeight: 19, marginTop: 4 },
+  videoCta: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    backgroundColor: '#F8FAFC',
+    borderRadius: radius.button,
+    paddingVertical: 12,
+    marginTop: spacing.sm,
+  },
+  videoCtaText: { color: '#0F172A', fontSize: 15, fontWeight: '800' },
 
   /* 현장 주소(지도 선택) */
   addrCard: {

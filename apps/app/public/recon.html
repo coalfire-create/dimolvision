@@ -104,7 +104,7 @@
   <body>
     <div class="wrap">
       <header><h1>3D 현장 복원</h1></header>
-      <p class="lead">
+      <p class="lead" id="lead">
         건물을 한 바퀴 돌며 찍은 영상에서 공간을 3차원으로 복원하고, 실측 기준 하나로
         면적·부피를 산출합니다.
       </p>
@@ -656,6 +656,19 @@ const SAMPLE = 72, KEEP = 60, MAX_EDGE = 1600;
       const $ = id => document.getElementById(id);
       let picked = null;
 
+      // ── 방 단위 실측(부분 철거) 연동 ──────────────────────────────────
+      // 견적 화면(/)에서 "○번 방을 영상으로 재기" 로 들어오면 room 인덱스가 붙어 온다.
+      // 그때는 바닥면적 하나가 아니라 가로·세로를 각각 그 방 입력칸에 채워 돌려준다 —
+      // 방 실측은 길이 두 개가 필요하고, 방 전체 연면적과는 다른 값이기 때문이다.
+      const roomParams = new URLSearchParams(location.search);
+      const roomIndex = roomParams.get('room');
+      const roomName = (roomParams.get('roomName') || '').trim();
+      if (roomIndex !== null) {
+        $('lead').textContent =
+          (roomName ? `"${roomName}" ` : '') +
+          '공간을 영상으로 한 바퀴 찍으면, 줄자 없이 가로·세로를 잽니다. 걸어서 방을 도는 촬영이면 충분합니다.';
+      }
+
       $('file').addEventListener('change', e => {
         picked = e.target.files[0] || null;
         $('fileName').textContent = picked
@@ -746,10 +759,19 @@ const SAMPLE = 72, KEEP = 60, MAX_EDGE = 1600;
           `(복원 1단위 = ${k.toFixed(3)}m). 기준이 어긋나면 <b>모든 치수가 같은 비율로</b> 어긋납니다. ` +
           `줄자로 잰 값이 있으면 그걸 넣는 편이 정확합니다.`;
 
-        // 잰 바닥면적을 그대로 분석 화면으로 넘긴다 — 여기서 견적으로 이어진다.
+        // 잰 치수를 그대로 분석 화면으로 넘긴다 — 여기서 견적으로 이어진다.
         const link = $('toAnalysis');
-        link.href = `/?areaM2=${floor}`;
-        link.textContent = `이 바닥면적(${floor}㎡)으로 철거 견적 내기 →`;
+        if (roomIndex !== null) {
+          // 방 실측: 바닥면적 하나가 아니라 가로·세로 두 값이 그 방 칸에 그대로 들어간다.
+          const q = new URLSearchParams({ room: roomIndex, roomLengthM: r1(w), roomWidthM: r1(d) });
+          if (roomName) q.set('roomName', roomName);
+          link.href = `/?${q.toString()}`;
+          link.textContent =
+            `이 치수(${r1(w)}m × ${r1(d)}m)로 ${roomName ? roomName + ' ' : ''}방 채우기 →`;
+        } else {
+          link.href = `/?areaM2=${floor}`;
+          link.textContent = `이 바닥면적(${floor}㎡)으로 철거 견적 내기 →`;
+        }
         link.classList.remove('hidden');
       }
 

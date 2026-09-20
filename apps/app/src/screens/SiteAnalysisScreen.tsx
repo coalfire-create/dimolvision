@@ -222,6 +222,27 @@ function readAreaFromUrl(): number | undefined {
   return Number.isFinite(v) && v > 0 && v <= 100_000 ? v : undefined;
 }
 
+/** 방 하나 실측 상한(m) — 오타(예: cm를 m로) 방지. 건물 한 면 길이로도 충분히 넉넉하다. */
+const MAX_ROOM_SIDE_M = 100;
+
+/**
+ * 3D 복원(/recon.html)이 방 단위로 잰 가로·세로를 쿼리로 넘겨준다.
+ * "영상으로 측정" 버튼으로 나갔다가 돌아왔을 때, 어느 방(room 인덱스)을 얼마로
+ * 채워야 하는지 여기서 읽는다. 값이 이상하면(0 이하·상한 초과·인덱스 없음) 무시한다.
+ */
+function readRoomMeasurementFromUrl():
+  { index: number; name: string; lengthM: number; widthM: number } | undefined {
+  if (Platform.OS !== 'web' || typeof window === 'undefined') return undefined;
+  const q = new URLSearchParams(window.location.search);
+  const index = Number(q.get('room'));
+  const lengthM = Number(q.get('roomLengthM'));
+  const widthM = Number(q.get('roomWidthM'));
+  if (!Number.isInteger(index) || index < 0) return undefined;
+  if (!Number.isFinite(lengthM) || lengthM <= 0 || lengthM > MAX_ROOM_SIDE_M) return undefined;
+  if (!Number.isFinite(widthM) || widthM <= 0 || widthM > MAX_ROOM_SIDE_M) return undefined;
+  return { index, name: (q.get('roomName') ?? '').trim(), lengthM, widthM };
+}
+
 function mimeFromUri(uri: string): string {
   return uri.toLowerCase().endsWith('.png') ? 'image/png' : 'image/jpeg';
 }
@@ -262,13 +283,36 @@ export function SiteAnalysisScreen() {
   /** 대장 조회 결과. 무엇이 자동으로 반영됐는지 화면에 근거로 보여 준다. */
   const [register, setRegister] = useState<BuildingRegisterInfo | null>(null);
 
-  // 지도 페이지가 선택한 지번을, 3D 복원 페이지가 실측 바닥면적을 쿼리로 넘겨준다.
+  // 지도 페이지가 선택한 지번을, 3D 복원 페이지가 실측 바닥면적(또는 방 단위 가로·세로)을 쿼리로 넘겨준다.
   useEffect(() => {
     const found = readParcelFromUrl();
     if (found) setParcel(found);
     const area = readAreaFromUrl();
     if (area !== undefined) setPyeong(String(m2ToPyeong(area)));
+
+    const roomMeasurement = readRoomMeasurementFromUrl();
+    if (roomMeasurement) {
+      setRoomsMode(true);
+      setRooms((prev) => {
+        const next = [...prev];
+        while (next.length <= roomMeasurement.index) next.push({ name: '', length: '', width: '' });
+        const row = next[roomMeasurement.index]!;
+        next[roomMeasurement.index] = {
+          name: row.name || roomMeasurement.name,
+          length: String(roomMeasurement.lengthM),
+          width: String(roomMeasurement.widthM),
+        };
+        return next;
+      });
+    }
   }, []);
+
+  /** 방 입력칸의 가로·세로를 손으로 재는 대신 영상(3D 복원)으로 잰다. */
+  function openRoomRecon(index: number, name: string) {
+    const q = new URLSearchParams({ room: String(index) });
+    if (name.trim()) q.set('roomName', name.trim());
+    void Linking.openURL(`/recon.html?${q.toString()}`);
+  }
 
   function applyAssets(assets: ImagePicker.ImagePickerAsset[]) {
     const picked = assets
@@ -743,47 +787,60 @@ export function SiteAnalysisScreen() {
               {roomsMode ? (
                 <View style={styles.roomsBox}>
                   <Text style={styles.roomsHint}>
-                    철거할 공간만 이름·가로·세로(m)로 입력하세요. 건물 전체 연면적보다 실제 대상
-                    범위를 정확히 반영해 물량·금액 추정이 정밀해집니다.
+                    가로·세로를 몰라도 됩니다 — 공간을 영상으로 한 바퀴 찍으면 자동으로 잽니다. 이미
+                    아는 치수가 있으면 직접 입력해도 됩니다.
                   </Text>
                   {rooms.map((r, i) => (
-                    <View key={i} style={styles.roomRow}>
-                      <TextInput
-                        style={[styles.roomInput, styles.roomInputName]}
-                        value={r.name}
-                        onChangeText={(v) => updateRoomRow(i, { name: v })}
-                        placeholder={`공간 ${i + 1}`}
-                        placeholderTextColor={theme.colors.textMuted}
-                        accessibilityLabel={`방 ${i + 1} 이름`}
-                      />
-                      <TextInput
-                        style={[styles.roomInput, styles.roomInputNum]}
-                        value={r.length}
-                        onChangeText={(v) => updateRoomRow(i, { length: v })}
-                        keyboardType="numeric"
-                        inputMode="numeric"
-                        placeholder="가로m"
-                        placeholderTextColor={theme.colors.textMuted}
-                        accessibilityLabel={`방 ${i + 1} 가로(m)`}
-                      />
-                      <TextInput
-                        style={[styles.roomInput, styles.roomInputNum]}
-                        value={r.width}
-                        onChangeText={(v) => updateRoomRow(i, { width: v })}
-                        keyboardType="numeric"
-                        inputMode="numeric"
-                        placeholder="세로m"
-                        placeholderTextColor={theme.colors.textMuted}
-                        accessibilityLabel={`방 ${i + 1} 세로(m)`}
-                      />
-                      <PressableScale
-                        style={styles.roomRemoveBtn}
-                        onPress={() => removeRoomRow(i)}
-                        accessibilityRole="button"
-                        accessibilityLabel={`방 ${i + 1} 삭제`}
-                      >
-                        <Text style={styles.roomRemoveText}>×</Text>
-                      </PressableScale>
+                    <View key={i} style={styles.roomCard}>
+                      <View style={styles.roomTopRow}>
+                        <TextInput
+                          style={[styles.roomInput, styles.roomNameInput]}
+                          value={r.name}
+                          onChangeText={(v) => updateRoomRow(i, { name: v })}
+                          placeholder={`공간 ${i + 1}`}
+                          placeholderTextColor={theme.colors.textMuted}
+                          accessibilityLabel={`방 ${i + 1} 이름`}
+                        />
+                        <PressableScale
+                          style={styles.roomRemoveBtn}
+                          onPress={() => removeRoomRow(i)}
+                          accessibilityRole="button"
+                          accessibilityLabel={`방 ${i + 1} 삭제`}
+                        >
+                          <Text style={styles.roomRemoveText}>×</Text>
+                        </PressableScale>
+                      </View>
+                      <View style={styles.roomBottomRow}>
+                        <TextInput
+                          style={[styles.roomInput, styles.roomInputNum]}
+                          value={r.length}
+                          onChangeText={(v) => updateRoomRow(i, { length: v })}
+                          keyboardType="numeric"
+                          inputMode="numeric"
+                          placeholder="가로m"
+                          placeholderTextColor={theme.colors.textMuted}
+                          accessibilityLabel={`방 ${i + 1} 가로(m)`}
+                        />
+                        <TextInput
+                          style={[styles.roomInput, styles.roomInputNum]}
+                          value={r.width}
+                          onChangeText={(v) => updateRoomRow(i, { width: v })}
+                          keyboardType="numeric"
+                          inputMode="numeric"
+                          placeholder="세로m"
+                          placeholderTextColor={theme.colors.textMuted}
+                          accessibilityLabel={`방 ${i + 1} 세로(m)`}
+                        />
+                        <PressableScale
+                          style={styles.roomVideoBtn}
+                          onPress={() => openRoomRecon(i, r.name)}
+                          accessibilityRole="button"
+                          accessibilityLabel={`방 ${i + 1} 영상으로 측정`}
+                        >
+                          <AppIcon name="camera" size={15} color={theme.colors.primary} />
+                          <Text style={styles.roomVideoText}>영상 측정</Text>
+                        </PressableScale>
+                      </View>
                     </View>
                   ))}
                   <PressableScale
@@ -1846,7 +1903,14 @@ const styles = StyleSheet.create({
     borderTopColor: colors.border,
   },
   roomsHint: { color: colors.textMuted, fontSize: 12, lineHeight: 17, marginBottom: spacing.xs },
-  roomRow: { flexDirection: 'row', gap: 6, marginBottom: 6, alignItems: 'center' },
+  roomCard: {
+    marginBottom: spacing.xs,
+    padding: 8,
+    borderRadius: radius.button,
+    backgroundColor: colors.surface,
+  },
+  roomTopRow: { flexDirection: 'row', gap: 6, alignItems: 'center' },
+  roomBottomRow: { flexDirection: 'row', gap: 6, alignItems: 'center', marginTop: 6 },
   roomInput: {
     borderColor: colors.border,
     borderWidth: 1.5,
@@ -1857,7 +1921,7 @@ const styles = StyleSheet.create({
     color: colors.text,
     backgroundColor: colors.background,
   },
-  roomInputName: { flex: 2 },
+  roomNameInput: { flex: 1 },
   roomInputNum: { flex: 1 },
   roomRemoveBtn: {
     width: 28,
@@ -1868,6 +1932,18 @@ const styles = StyleSheet.create({
     backgroundColor: colors.primarySoft,
   },
   roomRemoveText: { color: colors.primary, fontSize: 16, fontWeight: '800', lineHeight: 16 },
+  roomVideoBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 10,
+    paddingVertical: 9,
+    borderRadius: radius.button,
+    borderWidth: 1.5,
+    borderColor: colors.primary,
+    backgroundColor: colors.primarySoft,
+  },
+  roomVideoText: { color: colors.primary, fontSize: 12, fontWeight: '700' },
   roomAddBtn: { alignSelf: 'flex-start', marginTop: 2 },
   roomAddText: { color: colors.primary, fontSize: 12.5, fontWeight: '700' },
   roomTotal: { color: colors.text, fontSize: 13, fontWeight: '700', marginTop: spacing.xs },

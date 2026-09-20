@@ -325,16 +325,15 @@ const styles = StyleSheet.create({
   },
   buttonLabel: {
     fontSize: font.bodyLarge,
-    fontWeight: '700',
+    fontWeight: '800', // 토스처럼 훨씬 굵게
   },
   card: {
-    backgroundColor: colors.background,
-    borderColor: colors.border,
+    backgroundColor: colors.background, // 카드 배경은 흰색 (또는 서페이스에 따라)
     borderRadius: radius.card,
-    borderWidth: 1, // 필요하다면 보더를 0.5로 하거나 지울 수도 있지만, 깔끔함을 위해 유지
-    marginBottom: spacing.sm,
-    padding: spacing.lg, // 카드의 내부 여백을 더 시원하게 (md -> lg)
-    ...theme.shadow.card,
+    borderWidth: 0, // 보더 완전 제거
+    marginBottom: spacing.md, // 카드 간격 더 넓게
+    padding: spacing.lg,
+    // 그림자 제거, 플랫한 디자인
   },
   badge: {
     alignSelf: 'flex-start',
@@ -353,22 +352,18 @@ const styles = StyleSheet.create({
     marginBottom: spacing.xs,
   },
   fieldInput: {
-    backgroundColor: colors.background, // 기본 상태에서도 백그라운드를 흰색으로
-    borderColor: colors.border,
+    backgroundColor: colors.surface, // 토스 스타일의 옅은 회색 배경
     borderRadius: radius.button,
-    borderWidth: 1,
+    borderWidth: 0, // 보더 완전 제거
     color: colors.text,
     fontSize: font.bodyLarge,
     minHeight: touch.primaryButtonHeight,
-    paddingHorizontal: spacing.md, // 좀 더 여유있게
-    ...theme.shadow.card, // 인풋 필드에도 미세한 그림자
-    shadowOpacity: 0.02,
+    paddingHorizontal: spacing.md,
   },
   fieldInputFocused: {
-    borderColor: colors.primary,
-    borderWidth: 2, // 포커스 될 때만 더 뚜렷하게
-    ...theme.shadow.floating, // 포커스 시 살짝 떠오르는 느낌
-    shadowOpacity: 0.06,
+    backgroundColor: colors.surface, // 포커스 시 배경색 유지 (경우에 따라 약간 어둡게 하기도 함)
+    borderWidth: 0,
+    // 토스는 포커스 상태를 굳이 강하게 주지 않거나 보더만 살짝 줌. 여기서는 심플하게 유지.
   },
   fieldHint: {
     color: colors.textMuted,
@@ -395,8 +390,7 @@ const styles = StyleSheet.create({
     alignSelf: 'center',
   },
   infoRow: {
-    borderBottomColor: colors.border,
-    borderBottomWidth: 1,
+    borderBottomWidth: 0, // 경계선 제거
     flexDirection: 'row',
     justifyContent: 'space-between',
     paddingVertical: spacing.sm,

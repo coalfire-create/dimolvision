@@ -11,36 +11,36 @@ export const theme = {
   spacing: SPACING,
   touch: TOUCH,
   radius: {
-    card: 24,
-    button: 18,
+    card: 28, // 토스처럼 훨씬 더 둥근 모서리
+    button: 20, // 버튼도 더 둥글게
     badge: 999,
     pill: 999,
   },
-  /** 그림자 프리셋 — 현대적인 앱(Apple, Toss 등) 스타일의 은은하고 깊은 그림자 */
+  /** 그림자 프리셋 — 토스 스타일은 그림자를 거의 쓰지 않으나, 팝업 등에 아주 은은하게 사용 */
   shadow: {
-    /** 카드·시트 기본 그림자. 투명도를 대폭 낮추고 퍼짐(Radius)을 키움 */
+    /** 카드·시트 기본 그림자 - 토스는 배경색으로 면을 구분하므로 그림자를 극단적으로 줄임 */
     card: {
       shadowColor: '#000000',
-      shadowOpacity: 0.04,
-      shadowRadius: 20,
-      shadowOffset: { width: 0, height: 8 },
-      elevation: 3, // Android
+      shadowOpacity: 0.02,
+      shadowRadius: 10,
+      shadowOffset: { width: 0, height: 4 },
+      elevation: 1, // Android
     },
-    /** 주요 버튼 강조 그림자(브랜드 색). */
+    /** 주요 버튼 강조 그림자(브랜드 색) - 토스 버튼은 그림자 없는 경우가 많으므로 최소화 */
     primary: {
       shadowColor: COLORS.primary,
-      shadowOpacity: 0.25,
-      shadowRadius: 24,
-      shadowOffset: { width: 0, height: 10 },
-      elevation: 8,
+      shadowOpacity: 0.1,
+      shadowRadius: 12,
+      shadowOffset: { width: 0, height: 6 },
+      elevation: 3,
     },
-    /** 글래스모피즘용 가벼운 팝업/플로팅 그림자 */
+    /** 글래스모피즘/모달용 그림자 - 팝업 시에만 명확하게 떨어지도록 */
     floating: {
       shadowColor: '#000000',
       shadowOpacity: 0.08,
-      shadowRadius: 30,
-      shadowOffset: { width: 0, height: 12 },
-      elevation: 5,
+      shadowRadius: 40,
+      shadowOffset: { width: 0, height: 16 },
+      elevation: 8,
     }
   },
 } as const;

@@ -1479,16 +1479,13 @@ const styles = StyleSheet.create({
     alignSelf: 'center',
   },
   
-  /* 히어로 AI 카드 - 프리미엄 앱 스타일의 깊이있는 글래스모피즘 톤 */
+  /* 히어로 AI 카드 - 토스 스타일: 하얀 배경, 큰 여백, 그림자 없음, 완전 플랫 */
   heroCard: {
-    backgroundColor: '#121526', // 약간 푸른 빛이 도는 깊은 다크
-    borderRadius: radius.card * 1.2, // 살짝 더 둥글게
-    padding: spacing.md,
+    backgroundColor: colors.background, // 새하얀 배경
+    paddingTop: spacing.lg,
+    paddingBottom: spacing.lg,
+    paddingHorizontal: 0, // 컨텐트 패딩을 따름
     marginBottom: spacing.md,
-    ...theme.shadow.primary, // 프리미엄 쉐도우 사용
-    shadowOpacity: 0.25,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.08)',
   },
   heroBadgeRow: {
     flexDirection: 'row',
@@ -1497,18 +1494,16 @@ const styles = StyleSheet.create({
     marginBottom: spacing.xs,
   },
   heroCardBadge: {
-    backgroundColor: 'rgba(37, 99, 235, 0.25)',
-    borderWidth: 1,
-    borderColor: '#3B82F6',
+    backgroundColor: colors.surface,
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 10,
-    paddingVertical: 4,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
     borderRadius: 999,
   },
   heroCardBadgeText: {
-    color: '#93C5FD',
-    fontSize: 12,
+    color: colors.textMuted,
+    fontSize: 13,
     fontWeight: '800',
   },
   heroEngineTag: {
@@ -1517,11 +1512,13 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   heroCardTitle: {
-    color: '#F8FAFC',
-    fontSize: font.title - 2,
-    fontWeight: '800',
-    lineHeight: font.title + 4,
-    marginVertical: spacing.xs / 2,
+    color: colors.text, // 먹색 볼드
+    fontSize: font.titleLarge + 4, // 엄청나게 큼
+    fontWeight: '900', // 토스처럼 무겁게
+    lineHeight: font.titleLarge + 12,
+    marginTop: spacing.sm,
+    marginBottom: spacing.sm,
+    letterSpacing: -0.5,
   },
   heroChipsRow: {
     flexDirection: 'row',
@@ -1530,35 +1527,31 @@ const styles = StyleSheet.create({
     marginTop: spacing.xs,
   },
   heroChip: {
-    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+    backgroundColor: colors.surface,
     borderRadius: 8,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
     paddingHorizontal: 10,
     paddingVertical: 6,
-    borderWidth: 0.5,
-    borderColor: 'rgba(255,255,255,0.1)',
+    borderWidth: 0,
   },
   heroChipText: {
-    color: '#94A3B8',
-    fontSize: 12,
-    fontWeight: '600',
+    color: colors.textMuted,
+    fontSize: 13,
+    fontWeight: '700',
   },
 
-  /* 업로드 드롭존 - 너무 튀는 대시보드 느낌 제거하고 둥글고 부드럽게 */
+  /* 업로드 드롭존 - 옅은 회색 배경과 볼드 타이포, 선 없음 */
   dropzone: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.sm,
-    backgroundColor: colors.background, // 새하얀 배경에 은은한 쉐도우
+    backgroundColor: colors.surface,
     borderRadius: radius.card,
-    borderWidth: 1.5,
-    borderColor: colors.primarySoft, // 부드러운 브랜드 컬러 보더
-    padding: spacing.md,
+    borderWidth: 0, // 테두리 없음
+    padding: spacing.lg,
     marginBottom: spacing.md,
-    ...theme.shadow.card,
-    shadowOpacity: 0.03,
   },
   iconCircle: {
     width: 48,
@@ -1602,15 +1595,13 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
 
-  /* 샘플 체험 섹션 */
+  /* 샘플 체험 섹션 - 토스 스타일 둥근 배경 덩어리 */
   sampleSection: {
-    backgroundColor: colors.background,
-    borderColor: colors.border,
-    borderWidth: 1,
+    backgroundColor: colors.surface, // 옅은 회색
+    borderWidth: 0, // 선 제거
     borderRadius: radius.card,
-    padding: spacing.lg, // 좀 더 여유있게
+    padding: spacing.lg,
     marginBottom: spacing.md,
-    ...theme.shadow.card, // 하드한 보더 대신 부드러운 그림자 추가
   },
   sampleHeadTitle: {
     color: colors.text,

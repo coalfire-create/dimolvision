@@ -156,7 +156,11 @@
             </div>
           </div>
           <button id="camStart">카메라 켜고 촬영 시작</button>
-          <button id="camStop" class="ghost hidden">촬영 끝내기</button>
+          <button id="camStop" class="ghost hidden">촬영 끝내고 복원 시작</button>
+          <p class="sub" id="camHint" style="margin-top:8px">
+            촬영은 <b>직접 끝낼 때까지 계속</b>됩니다. 한 바퀴 다 돌고 나서 눌러 주세요 —
+            많이 돌수록 사각지대가 줄어듭니다.
+          </p>
           <div id="camErr" class="err hidden"></div>
         </div>
 
@@ -900,7 +904,11 @@ let CAPTURE_QUALITY = 0.58;
         TICK_MS: 140,        // 판정 주기
         GAP: 2,              // 몇 틱 전과 비교할지(인접 프레임은 차이가 잡음에 묻힌다)
         SHOT_MS: 420,        // 좋은 구간에서 프레임을 담는 간격
-        TARGET: 60,          // 목표 장수(실측에서 정확도 대비 가장 좋았던 수)
+        // 권장 장수(실측에서 정확도 대비 가장 좋았던 수). **여기서 멈추지 않는다** —
+        // 더 찍을수록 사각지대가 줄어들고, 어차피 보낼 때 이 중에서 가장 좋은 것들을 고른다.
+        TARGET: 60,
+        // 메모리 보호용 상한. 여기까지 가면 더 담아도 얻는 게 없다.
+        MAX: 150,
         // 끝내도 되는 최소 장수. 24장으로 뒀던 건 실측을 무시한 값이었다:
         //   28장 → 정합 4/28 · 점 125 (실패)    60장 → 정합 27/60 · 점 2,194
         // 20~30장대는 실패 구간이라 "끝내도 된다" 고 말하면 안 된다.
@@ -946,12 +954,11 @@ let CAPTURE_QUALITY = 0.58;
         const pct = Math.min(100, (shots / LIVE.TARGET) * 100);
         $('camBar').style.width = pct + '%';
         $('camStats').textContent =
-          `좋은 장면 ${shots} / ${LIVE.TARGET}장` +
-          (shots >= LIVE.TARGET
-            ? ' · 충분합니다'
+          shots >= LIVE.TARGET
+            ? `좋은 장면 ${shots}장 · 충분합니다 — 더 돌면 사각지대가 줄어듭니다`
             : shots >= LIVE.MIN_OK
-              ? ' · 끝내도 되지만 60장이 가장 정확합니다'
-              : ` · ${LIVE.MIN_OK}장은 모아야 복원됩니다`);
+              ? `좋은 장면 ${shots} / ${LIVE.TARGET}장 · 끝내도 되지만 ${LIVE.TARGET}장이 가장 정확합니다`
+              : `좋은 장면 ${shots} / ${LIVE.TARGET}장 · ${LIVE.MIN_OK}장은 모아야 복원됩니다`;
         $('camStop').disabled = shots < LIVE.MIN_OK;
       }
 
@@ -1035,7 +1042,7 @@ let CAPTURE_QUALITY = 0.58;
           // 잘 걷고 있는 순간에만 프레임을 담는다. 제자리 회전 구간을 담으면
           // 복원되지 않는 프레임만 늘어나 정합률을 끌어내린다.
           const now = Date.now();
-          if (shown === 'GOOD' && now - st.lastShot >= LIVE.SHOT_MS && st.shots.length < LIVE.TARGET) {
+          if (shown === 'GOOD' && now - st.lastShot >= LIVE.SHOT_MS && st.shots.length < LIVE.MAX) {
             st.lastShot = now;
 
             // 걸으며 찍으면 흔들린 프레임이 섞인다. 흔들리면 특징점이 사라져
@@ -1055,7 +1062,9 @@ let CAPTURE_QUALITY = 0.58;
             const b64 = sCv.toDataURL('image/jpeg', CAPTURE_QUALITY).split(',')[1];
             if (b64) st.shots.push({ base64: b64, timeSec: (now - st.started) / 1000, tiny, sharpness: sharp });
             setCoach(shown, st.shots.length);
-            if (st.shots.length >= LIVE.TARGET) finishLive();
+            // 권장 장수를 넘겨도 멈추지 않는다. 끝내는 시점은 찍는 사람이 정한다.
+            // 상한은 메모리 보호일 뿐이며, 거기 닿으면 알리고 마무리한다.
+            if (st.shots.length >= LIVE.MAX) finishLive();
           }
         }, LIVE.TICK_MS);
       }
@@ -1079,10 +1088,16 @@ let CAPTURE_QUALITY = 0.58;
           return;
         }
 
-        // 라이브에서 이미 좋은 구간만 담았지만, 전체를 한 번 더 검증한다.
-        const capture = assessCapture(shots);
-        for (const f of shots) delete f.tiny;
-        const fitted = await fitToBudget(shots, (msg) => setStage(msg, 40));
+        // 많이 찍었으면 전부 보내지 않는다. 구간을 나눠 각 구간에서 가장 선명한 것을 골라
+        // 촬영 전체를 고르게 덮는다 — 앞부분만 잔뜩 보내면 건물 한 면만 복원된다.
+        const used = shots.length > LIVE.TARGET ? pickSpread(shots, LIVE.TARGET) : shots;
+        if (shots.length > used.length) {
+          setStage(`${shots.length}장 중 선명한 ${used.length}장을 골랐습니다`, 42);
+        }
+        // 라이브에서 좋은 구간만 담았지만, 실제로 보낼 것들로 한 번 더 검증한다.
+        const capture = assessCapture(used);
+        for (const f of used) delete f.tiny;
+        const fitted = await fitToBudget(used, (msg) => setStage(msg, 40));
         showAnalyzeLink(stashForAnalysis(fitted));
 
         if (showCaptureBlock(capture, () => runReconstruct(fitted))) return;

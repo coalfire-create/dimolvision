@@ -1431,8 +1431,10 @@ let CAPTURE_QUALITY = 0.58;
           // 이유였다. 처음 각도 둘레 ±20° 안에서만 천천히 오간다. 입체감은
           // 그대로 주면서 "좋은 각도" 를 잃지 않는다.
           if (!dragging) {
-            swing += 0.006;
-            ry = ryBase + Math.sin(swing) * 0.35;
+            // 느리고 좁게. 처음 몇 초는 고른 각도를 거의 그대로 유지해야 한다 —
+            // 열어 본 사람이 보는 건 그 몇 초고, 캡처도 거기서 찍힌다.
+            swing += 0.0016;
+            ry = ryBase + Math.sin(swing) * 0.2;
             apply();
           }
           renderer.render(scene, camera);

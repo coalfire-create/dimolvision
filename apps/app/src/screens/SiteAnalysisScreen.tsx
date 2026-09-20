@@ -216,6 +216,38 @@ function readAreaFromUrl(): number | undefined {
   return Number.isFinite(v) && v > 0 && v <= 100_000 ? v : undefined;
 }
 
+/**
+ * 3D 촬영(/recon.html)에서 넘어온 프레임을 받는다.
+ *
+ * 현장에서 사진 따로·영상 따로 두 번 찍게 하면 안 된다. 걸으며 찍은 영상에서 고른
+ * 선명한 몇 장이면 소재 식별에는 충분하므로, 같은 촬영을 분석에도 쓴다.
+ * 서버에 임시 저장하지 않고 같은 출처의 sessionStorage 로만 넘긴다 —
+ * "사진을 보관하지 않는다" 는 원칙을 지키기 위해서다.
+ */
+const CAPTURE_FRAMES_KEY = 'dimol.captureFrames';
+
+function takeCapturedFrames(): PickedImage[] {
+  if (Platform.OS !== 'web' || typeof window === 'undefined') return [];
+  try {
+    const raw = sessionStorage.getItem(CAPTURE_FRAMES_KEY);
+    if (!raw) return [];
+    // 한 번 쓰고 지운다. 남겨두면 새로고침할 때마다 같은 촬영이 되살아난다.
+    sessionStorage.removeItem(CAPTURE_FRAMES_KEY);
+    const list = JSON.parse(raw) as unknown;
+    if (!Array.isArray(list)) return [];
+    return list
+      .filter((b): b is string => typeof b === 'string' && b.length > 100)
+      .slice(0, MAX_PHOTOS)
+      .map((base64) => ({
+        base64,
+        mimeType: 'image/jpeg',
+        uri: `data:image/jpeg;base64,${base64}`,
+      }));
+  } catch {
+    return [];
+  }
+}
+
 function mimeFromUri(uri: string): string {
   return uri.toLowerCase().endsWith('.png') ? 'image/png' : 'image/jpeg';
 }
@@ -240,6 +272,8 @@ export function SiteAnalysisScreen() {
   const [estimate, setEstimate] = useState<VolumeEstimate | null>(null);
   /** 공표 단가로 계산한 금액 견적. 분류별 물량이 나왔을 때만 채워진다. */
   const [cost, setCost] = useState<CostEstimate | null>(null);
+  /** 영상 촬영에서 넘어와 분석을 기다리는 프레임. */
+  const [pendingCapture, setPendingCapture] = useState<PickedImage[] | null>(null);
   /**
    * 지도에서 찍은 현장 주소. 지번 코드가 함께 가면 서버가 건축물대장을 조회해
    * 주구조·연면적·사용승인연도를 채운다 — 사용자가 몰라도 되는 값들이다.
@@ -248,13 +282,39 @@ export function SiteAnalysisScreen() {
   /** 대장 조회 결과. 무엇이 자동으로 반영됐는지 화면에 근거로 보여 준다. */
   const [register, setRegister] = useState<BuildingRegisterInfo | null>(null);
 
-  // 지도 페이지가 선택한 지번을, 3D 복원 페이지가 실측 바닥면적을 쿼리로 넘겨준다.
+  // 지도 페이지가 선택한 지번을, 3D 복원 페이지가 실측 바닥면적과 촬영 프레임을 넘겨준다.
   useEffect(() => {
     const found = readParcelFromUrl();
     if (found) setParcel(found);
     const area = readAreaFromUrl();
     if (area !== undefined) setPyeong(String(m2ToPyeong(area)));
+
+    // 영상으로 찍고 넘어왔으면 사용자가 다시 누르게 하지 않고 바로 분석한다.
+    const frames = takeCapturedFrames();
+    if (frames.length > 0) {
+      setImages(frames);
+      setPendingCapture(frames);
+    }
   }, []);
+
+  // 넘겨받은 프레임은 parcel 상태까지 자리잡은 뒤에 분석해야 주소가 함께 실린다.
+  useEffect(() => {
+    if (!pendingCapture) return;
+    const shots = pendingCapture;
+    setPendingCapture(null);
+    void (async () => {
+      setError(null);
+      setLoading(true);
+      try {
+        await runAnalysis(shots);
+      } catch (err) {
+        setError(err instanceof ApiError ? err.message : '분석에 실패했습니다. 다시 시도해 주세요.');
+      } finally {
+        setLoading(false);
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingCapture]);
 
 
   function applyAssets(assets: ImagePicker.ImagePickerAsset[]) {
@@ -553,7 +613,25 @@ export function SiteAnalysisScreen() {
           </FadeInUp>
         )}
 
-        {/* 촬영 & 앨범 버튼 액션 카드로 리디자인 */}
+        {/* 한 번 걸으며 찍으면 소재 분석·견적·3D·부피가 한꺼번에 나온다. */}
+        <FadeInUp delay={100}>
+          <PressableScale
+            style={styles.videoCard}
+            onPress={() => void Linking.openURL('/recon.html')}
+            accessibilityRole="button"
+          >
+            <View style={styles.videoBadge}>
+              <Text style={styles.videoBadgeText}>권장</Text>
+            </View>
+            <Text style={styles.videoTitle}>영상으로 촬영</Text>
+            <Text style={styles.videoSub}>
+              벽을 따라 걸으며 한 번 찍으면 소재 분석·견적에 더해 3D 복원과 면적·부피까지
+              나옵니다. 찍는 동안 화면이 실시간으로 촬영을 봐 줍니다.
+            </Text>
+          </PressableScale>
+        </FadeInUp>
+
+        {/* 사진만 필요할 때의 경로. */}
         <FadeInUp delay={120}>
           <View style={styles.pickRow}>
             <PressableScale style={styles.actionCard} onPress={takePhoto} accessibilityRole="button">
@@ -1620,6 +1698,25 @@ const styles = StyleSheet.create({
   },
 
   /* 연면적 입력 카드 */
+  /* 영상 촬영 (권장 동선) */
+  videoCard: {
+    backgroundColor: '#0F172A',
+    borderRadius: radius.card,
+    padding: spacing.md,
+    marginTop: spacing.md,
+  },
+  videoBadge: {
+    alignSelf: 'flex-start',
+    backgroundColor: 'rgba(52,211,153,0.18)',
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 3,
+    marginBottom: 6,
+  },
+  videoBadgeText: { color: '#6EE7B7', fontSize: 11, fontWeight: '800' },
+  videoTitle: { color: '#F8FAFC', fontSize: font.bodyLarge, fontWeight: '800' },
+  videoSub: { color: '#94A3B8', fontSize: 13, lineHeight: 19, marginTop: 4 },
+
   /* 현장 주소(지도 선택) */
   addrCard: {
     backgroundColor: colors.background,

@@ -117,6 +117,9 @@
       .preset.on { border-color: var(--primary); background: var(--soft); }
       .preset b { display: block; font-size: 14px; }
       .preset span { font-size: 12px; color: var(--muted); }
+      #toAnalyze { display: block; margin-top: 12px; text-align: center; padding: 13px;
+                   background: #0f172a; color: #fff; border-radius: 12px;
+                   font-weight: 800; text-decoration: none; }
       #toAnalysis { display: block; margin-top: 12px; text-align: center; padding: 13px;
                     background: var(--primary); color: #fff; border-radius: 12px;
                     font-weight: 800; text-decoration: none; }
@@ -209,6 +212,7 @@
         <div id="stage"></div>
         <div id="error" class="err hidden"></div>
         <div id="captureBlock" class="blk hidden"></div>
+        <a id="toAnalyze" class="hidden" href="/"></a>
       </div>
 
       <div id="result" class="card hidden">
@@ -738,6 +742,38 @@ let CAPTURE_QUALITY = 0.58;
         return true;
       }
 
+      /**
+       * 같은 촬영을 사진 분석에도 쓴다.
+       *
+       * 현장에서 두 번 찍게 하면 안 된다. 3D 용으로 걸으며 찍은 프레임 중 선명하고 고르게
+       * 퍼진 몇 장이면 소재 식별에는 충분하다. 앱과 같은 출처라 sessionStorage 로 넘긴다
+       * (서버에 임시 저장하면 사진을 보관하지 않는다는 원칙이 깨진다).
+       */
+      const ANALYZE_KEY = 'dimol.captureFrames';
+      const ANALYZE_COUNT = 6;   // 서버 MAX_ANALYZE_IMAGES 와 같다
+
+      function stashForAnalysis(frames) {
+        // 선명도 정보가 있으면 구간별 최선을, 없으면 고르게 뽑는다.
+        const picked = frames[0]?.sharpness !== undefined
+          ? pickSpread(frames, Math.min(ANALYZE_COUNT, frames.length))
+          : frames.filter((_, i, a) =>
+              i % Math.max(1, Math.round(a.length / ANALYZE_COUNT)) === 0).slice(0, ANALYZE_COUNT);
+        try {
+          sessionStorage.setItem(ANALYZE_KEY, JSON.stringify(picked.map((f) => f.base64)));
+          return picked.length;
+        } catch {
+          // 용량 초과 등 — 분석 연결만 포기하고 3D 는 그대로 진행한다.
+          return 0;
+        }
+      }
+
+      function showAnalyzeLink(count) {
+        if (count <= 0) return;
+        const el = $('toAnalyze');
+        el.classList.remove('hidden');
+        el.textContent = `이 촬영으로 현장 분석·견적 보기 (${count}장) →`;
+      }
+
       async function extractFrames(file, onProgress, onStage) {
         const url = URL.createObjectURL(file);
         const v = document.createElement('video');
@@ -768,6 +804,7 @@ let CAPTURE_QUALITY = 0.58;
           // tiny 는 판정용이라 여기서 버린다(그대로 두면 메모리를 붙들고 있다).
           for (const f of picked) delete f.tiny;
           const fitted = await fitToBudget(picked, onStage);
+          showAnalyzeLink(stashForAnalysis(fitted));
           return { frames: fitted, capture };
         } finally {
           URL.revokeObjectURL(url); v.removeAttribute('src'); v.load();
@@ -1018,6 +1055,7 @@ let CAPTURE_QUALITY = 0.58;
         const capture = assessCapture(shots);
         for (const f of shots) delete f.tiny;
         const fitted = await fitToBudget(shots, (msg) => setStage(msg, 40));
+        showAnalyzeLink(stashForAnalysis(fitted));
 
         if (showCaptureBlock(capture, () => runReconstruct(fitted))) return;
         await runReconstruct(fitted);

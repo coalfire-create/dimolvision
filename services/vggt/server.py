@@ -38,6 +38,9 @@ from vggt.utils.geometry import unproject_depth_map_to_point_map
 # 한 번에 넣는 최대 장수. VGGT 는 모든 프레임을 함께 보므로 메모리가 장수의 제곱으로
 # 늘어난다. L4(24GB)에서 안전한 범위로 잡고, 더 오면 고르게 솎아 쓴다.
 MAX_VIEWS = int(os.environ.get("VGGT_MAX_VIEWS", "48"))
+# "pad"(화각 보존) | "crop"(VGGT 기본값, 높이를 가운데만 남김). 환경변수로 바꿔
+# 재빌드 없이 비교할 수 있게 둔다.
+PREPROCESS_MODE = os.environ.get("VGGT_PREPROCESS", "pad")
 # 돌려줄 점 개수 상한.
 #
 # 2만 개로 두었더니 화면이 "점들의 집합" 으로만 보였다. 방처럼 보이려면 두 가지가
@@ -239,7 +242,16 @@ def reconstruct(img_dir: str) -> dict:
         return {"ok": False, "stage": "input", "log": "사진이 2장 이상 필요합니다."}
 
     used = pick_even([os.path.join(img_dir, n) for n in names], MAX_VIEWS)
-    images = load_and_preprocess_images(used).to(_device)
+    # 전처리 모드가 화각을 좌우한다.
+    #
+    # VGGT 는 어떤 입력이든 518px 로 줄인다. 기본값 "crop" 은 **폭**을 518 로 맞춘 뒤
+    # 높이가 남으면 가운데만 잘라낸다. 세로로 든 휴대폰(9:16)이면 높이 921px 가
+    # 518px 로 잘려 위아래 44% 가 사라진다 — 실내에서 그건 천장과 바닥이다.
+    # 걸으며 찍은 영상의 바닥이 복원되지 않던 이유가 여기 있었다.
+    #
+    # "pad" 는 긴 변을 518 로 맞추고 짧은 변을 여백으로 채운다. 화소는 줄지만
+    # 화각이 통째로 남는다. 잘라낸 곳은 되살릴 수 없고, 흐릿한 바닥은 쓸 수 있다.
+    images = load_and_preprocess_images(used, mode=PREPROCESS_MODE).to(_device)
 
     with torch.no_grad():
         with torch.autocast(device_type="cuda" if _device == "cuda" else "cpu", dtype=_dtype):

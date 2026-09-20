@@ -27,13 +27,17 @@
         background: var(--card); border: 1px solid var(--border); 
         border-radius: 16px; padding: 24px; margin-bottom: 16px;
         box-shadow: 0 8px 24px rgba(15, 23, 42, 0.03); 
+        transition: transform 0.2s ease, box-shadow 0.2s ease;
       }
+      .card:hover { transform: translateY(-2px); box-shadow: 0 16px 40px rgba(15, 23, 42, 0.06); }
       .card h2 { font-size: 16px; margin: 0 0 6px; font-weight: 800; }
       .card p.sub { color: var(--muted); font-size: 14px; margin: 0 0 16px; }
       label.file {
         display: block; border: 1px dashed rgba(37, 99, 235, 0.3); border-radius: 12px; padding: 24px 16px;
         text-align: center; cursor: pointer; background: var(--soft); color: var(--primary); font-weight: 800; font-size: 15px;
+        transition: all 0.2s ease;
       }
+      label.file:hover { background: #E0E7FF; border-color: rgba(37, 99, 235, 0.6); transform: translateY(-1px); }
       label.file span { display: block; color: var(--muted); font-weight: 400; font-size: 13px; margin-top: 4px; }
       input[type=file] { display: none; }
       .row { display: flex; gap: 10px; align-items: flex-end; flex-wrap: wrap; }
@@ -42,12 +46,15 @@
       select, input[type=number] {
         width: 100%; padding: 14px 12px; border: 1px solid var(--border);
         border-radius: 12px; font-size: 15px; background: #fff; color: var(--text); outline: none;
+        transition: all 0.2s ease;
       }
-      select:focus, input[type=number]:focus { border-color: var(--primary); box-shadow: 0 0 0 2px var(--soft); }
+      select:focus, input[type=number]:focus { border-color: var(--primary); box-shadow: 0 0 0 3px var(--soft); }
       button {
         width: 100%; padding: 16px; border: 0; border-radius: 12px; background: var(--primary);
         color: #fff; font-size: 16px; font-weight: 800; cursor: pointer; margin-top: 16px;
+        transition: transform 0.15s ease, opacity 0.15s ease;
       }
+      button:hover:not(:disabled) { transform: scale(1.02); opacity: 0.95; box-shadow: 0 8px 20px rgba(37, 99, 235, 0.2); }
       button:disabled { background: #a8b6e8; cursor: default; }
       #stage { font-size: 13px; color: var(--muted); margin-top: 10px; min-height: 20px; }
       .bar { height: 6px; background: var(--border); border-radius: 3px; overflow: hidden; margin-top: 8px; }
@@ -66,8 +73,9 @@
                border-radius: 12px; font-size: 13px; color: #92400e; font-weight: 600; }
       /* 촬영 모드 전환 */
       .modes { display: flex; gap: 8px; margin-bottom: 16px; }
-      .mode { flex: 1; margin: 0; padding: 12px; font-size: 14px; font-weight: 800;
-              background: #fff; color: var(--muted); border: 1px solid var(--border); border-radius: 12px; }
+      .mode { flex: 1; margin: 0; padding: 12px; font-size: 14px; font-weight: 800; cursor: pointer;
+              background: #fff; color: var(--muted); border: 1px solid var(--border); border-radius: 12px; transition: all 0.2s ease; }
+      .mode:hover:not(.on) { background: #f1f5f9; }
       .mode.on { background: var(--soft); color: var(--primary); border-color: rgba(37, 99, 235, 0.2); }
 
       /* 라이브 촬영 */
@@ -134,7 +142,8 @@
 
       .presets { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; margin: 16px 0; }
       .preset { display: block; width: 100%; text-align: left; background: #fff; border: 1px solid var(--border);
-                border-radius: 12px; padding: 14px 16px; cursor: pointer; font: inherit; color: inherit; margin: 0; }
+                border-radius: 12px; padding: 14px 16px; cursor: pointer; font: inherit; color: inherit; margin: 0; transition: all 0.2s ease; }
+      .preset:hover:not(.on) { border-color: rgba(37, 99, 235, 0.3); transform: translateY(-1px); }
       .preset.on { border-color: var(--primary); background: var(--soft); box-shadow: 0 0 0 1px var(--primary); }
       .preset b { display: block; font-size: 15px; font-weight: 800; margin-bottom: 2px; }
       .preset span { font-size: 13px; color: var(--muted); }
@@ -1002,9 +1011,11 @@ let CAPTURE_QUALITY = 0.58;
           pos[k * 3] = x; pos[k * 3 + 1] = y; pos[k * 3 + 2] = z;
           if (col) {
             // three.js 색은 0~1 이다. 약간 밝혀 어두운 실내도 형상이 보이게 한다.
-            col[k * 3] = Math.min(1, (colors[i * 3] / 255) * 1.15);
-            col[k * 3 + 1] = Math.min(1, (colors[i * 3 + 1] / 255) * 1.15);
-            col[k * 3 + 2] = Math.min(1, (colors[i * 3 + 2] / 255) * 1.15);
+            // 철거 현장은 조명이 없어 원본이 어둡다. 그대로 그리면 검은 덩어리가 된다.
+            // 감마를 낮춰 어두운 쪽을 끌어올리고 살짝 밝힌다 — 형상이 읽히게 하려는 것이다.
+            col[k * 3] = Math.min(1, Math.pow(colors[i * 3] / 255, 0.65) * 1.1);
+            col[k * 3 + 1] = Math.min(1, Math.pow(colors[i * 3 + 1] / 255, 0.65) * 1.1);
+            col[k * 3 + 2] = Math.min(1, Math.pow(colors[i * 3 + 2] / 255, 0.65) * 1.1);
           }
           maxR = Math.max(maxR, Math.hypot(x, y, z));
           k++;
@@ -1019,9 +1030,11 @@ let CAPTURE_QUALITY = 0.58;
         // 크게 찍으면 벽으로 보인다. 그래서 크기를 **점 밀도에서 계산**한다 —
         // 화면을 채운 부피를 점 개수로 나눠 점 사이 평균 간격을 구하고, 그 1.7배로
         // 그린다. 이러면 이웃끼리 조금씩 겹쳐 빈틈이 메워진다.
+        // 점 사이 평균 간격의 몇 배로 그릴지가 "먼지 vs 벽" 을 가른다.
+        // 1.7배로는 빈틈이 남았다. 2.8배면 이웃끼리 확실히 겹쳐 면이 메워진다.
         const vol = Math.max(1e-6, (2 * med) ** 3);
         const spacing = Math.cbrt(vol / Math.max(1, k));
-        const pointSize = Math.min(maxR / 40, Math.max(maxR / 400, spacing * 1.7));
+        const pointSize = Math.min(maxR / 25, Math.max(maxR / 300, spacing * 2.8));
 
         cloud = new THREE.Points(geo, new THREE.PointsMaterial({
           ...(col ? { vertexColors: true } : { color: 0x93c5fd }),
@@ -1045,7 +1058,8 @@ let CAPTURE_QUALITY = 0.58;
           scene.add(new THREE.Line(cg, new THREE.LineBasicMaterial({ color: 0xff5d28 })));
         }
 
-        let rx = 0.3, ry = 0.6, dist = maxR * 2.6, dragging = false, lx = 0, ly = 0;
+        // 방이 화면을 채워야 형태가 읽힌다. 2.6배는 너무 멀어 덩어리로 보였다.
+        let rx = 0.35, ry = 0.6, dist = maxR * 1.5, dragging = false, lx = 0, ly = 0;
         const apply = () => {
           camera.position.set(
             dist * Math.cos(rx) * Math.sin(ry),

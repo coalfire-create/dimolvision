@@ -301,6 +301,13 @@ export function SiteAnalysisScreen() {
   /** 영상 촬영에서 넘어와 분석을 기다리는 프레임. */
   const [pendingCapture, setPendingCapture] = useState<PickedImage[] | null>(null);
   /**
+   * 이 사진들이 3D 촬영에서 넘어온 것인지.
+   *
+   * 넘어온 걸 그냥 "6장 종합 분석" 이라고만 쓰면, 사진을 고른 적이 없는 사용자는
+   * 이 6장이 어디서 왔는지 알 수 없다. 영상에서 고른 것이라고 말해야 한다.
+   */
+  const [fromCapture, setFromCapture] = useState(false);
+  /**
    * 지도에서 찍은 현장 주소. 지번 코드가 함께 가면 서버가 건축물대장을 조회해
    * 주구조·연면적·사용승인연도를 채운다 — 사용자가 몰라도 되는 값들이다.
    */
@@ -320,6 +327,7 @@ export function SiteAnalysisScreen() {
     if (frames.length > 0) {
       setImages(frames);
       setPendingCapture(frames);
+      setFromCapture(true);
     }
   }, []);
 
@@ -542,10 +550,14 @@ export function SiteAnalysisScreen() {
               {images.length > 1 ? (
                 <View style={styles.multiBadge}>
                   <AppIcon name="camera" size={13} color="#FFFFFF" />
-                  <Text style={styles.multiBadgeText}>{images.length}장 종합 분석</Text>
+                  <Text style={styles.multiBadgeText}>
+                    {fromCapture
+                      ? `촬영 영상에서 고른 ${images.length}장`
+                      : `${images.length}장 종합 분석`}
+                  </Text>
                 </View>
               ) : null}
-              <PressableScale style={styles.repickChip} onPress={() => setImages([])}>
+              <PressableScale style={styles.repickChip} onPress={() => { setImages([]); setFromCapture(false); }}>
                 <AppIcon name="recycle" size={16} color="#FFFFFF" />
                 <Text style={styles.repickChipText}>다시 선택</Text>
               </PressableScale>
@@ -817,9 +829,11 @@ export function SiteAnalysisScreen() {
             label={
               result
                 ? '면적 반영해 다시 분석'
-                : images.length > 1
-                  ? `${images.length}장 종합 분석하기`
-                  : '이 사진 분석하기'
+                : fromCapture
+                  ? `촬영 영상에서 고른 ${images.length}장으로 분석하기`
+                  : images.length > 1
+                    ? `${images.length}장 종합 분석하기`
+                    : '이 사진 분석하기'
             }
             onPress={analyze}
             loading={loading}

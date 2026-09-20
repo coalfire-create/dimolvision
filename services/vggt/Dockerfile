@@ -30,8 +30,9 @@ RUN for i in 1 2 3; do \
     done
 
 # Poisson 표면 재구성용. 점군을 삼각형 면으로 바꿔야 "벽" 으로 보인다.
-# open3d 0.18 은 numpy 1.x 로 빌드돼 있어 이 이미지의 numpy 2.x 와 ABI 가 어긋난다
-# — 자식 프로세스가 SIGSEGV 로 죽는다(실측 종료코드 -11). 0.19 부터 numpy 2 를 지원한다.
+# 0.19 를 쓰는 이유는 numpy 2 지원이다(0.18 은 numpy 1.x 로 빌드돼 있다).
+# 다만 자식 프로세스가 -11 로 죽던 진짜 원인은 ABI 가 아니라 PoissonRecon 의
+# 스레드 경쟁이었다 — server.py 의 n_threads=1 주석을 보라.
 RUN pip install --no-cache-dir open3d==0.19.0
 
 COPY server.py /app/server.py

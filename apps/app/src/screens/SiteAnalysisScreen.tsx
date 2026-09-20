@@ -35,8 +35,10 @@ import {
   ApiError,
   analyzeSite,
   analyzeSiteWasteItems,
+  lookupBuildingOutline,
   lookupBuildingRegister,
   type BuildingFloor,
+  type BuildingOutline,
   type BuildingRegisterInfo,
 } from '../api/client';
 import { AppIcon } from '../components/AppIcon';
@@ -178,6 +180,9 @@ interface PickedParcel {
   bun: string;
   ji: string;
   address: string;
+  /** 지도에서 찍은 좌표. 건물 외곽선은 지번이 아니라 좌표로 조회한다. */
+  lat?: number;
+  lng?: number;
 }
 
 /**
@@ -199,6 +204,9 @@ function readParcelFromUrl(): PickedParcel | null {
     bun: pad(q.get('bun')),
     ji: pad(q.get('ji')),
     address: (q.get('addr') ?? '').trim(),
+    ...(Number.isFinite(Number(q.get('lat'))) && Number.isFinite(Number(q.get('lng')))
+      ? { lat: Number(q.get('lat')), lng: Number(q.get('lng')) }
+      : {}),
   };
 }
 
@@ -307,6 +315,8 @@ export function SiteAnalysisScreen() {
   const [parcel, setParcel] = useState<PickedParcel | null>(null);
   /** 대장 조회 결과. 무엇이 자동으로 반영됐는지 화면에 근거로 보여 준다. */
   const [register, setRegister] = useState<BuildingRegisterInfo | null>(null);
+  /** 공공데이터 건물 외곽선 — 영상 없이 얻는 평면 형상. */
+  const [outline, setOutline] = useState<BuildingOutline | null>(null);
 
   // 지도 페이지가 선택한 지번을, 3D 복원 페이지가 실측 바닥면적(또는 방 단위 가로·세로)을 쿼리로 넘겨준다.
   useEffect(() => {
@@ -347,6 +357,15 @@ export function SiteAnalysisScreen() {
       .catch(() => {
         // 키가 없거나 대장에 없는 지번이면 조용히 넘어간다 — 분석은 그대로 된다.
       });
+    // 건물 외곽선(공공데이터 평면 형상)도 함께. 설정이 없으면 503 이라 조용히 넘어간다.
+    setOutline(null);
+    if (parcel.lat !== undefined && parcel.lng !== undefined) {
+      lookupBuildingOutline(parcel.lat, parcel.lng)
+        .then((found) => {
+          if (live) setOutline(found);
+        })
+        .catch(() => {});
+    }
     return () => {
       live = false;
     };
@@ -772,6 +791,19 @@ export function SiteAnalysisScreen() {
                     <Text style={styles.regChipText}>{c}</Text>
                   </View>
                 ))}
+              </View>
+            ) : null}
+
+            {/* 공공데이터 건물 외곽선 — 영상을 찍지 않고도 얻는 평면 형상과 건축면적. */}
+            {outline ? (
+              <View style={styles.outlineBox}>
+                <Text style={styles.outlineTitle}>
+                  공공데이터 건물 외곽선 · 건축면적 {outline.areaM2}㎡
+                </Text>
+                <Text style={styles.outlineSub}>
+                  GIS건물통합정보에서 가져온 실제 건물 형상입니다(꼭짓점 {outline.ring.length}개).
+                  건물 전체를 철거한다면 영상을 찍지 않아도 이 형상이 근거가 됩니다.
+                </Text>
               </View>
             ) : null}
 
@@ -1940,6 +1972,16 @@ const styles = StyleSheet.create({
   addrValue: { color: colors.text, fontSize: font.body, fontWeight: '700', marginTop: 6 },
   addrCodes: { color: colors.textMuted, fontSize: 12, marginTop: 2 },
   regRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: spacing.sm },
+
+  /* 공공데이터 건물 외곽선 */
+  outlineBox: {
+    marginTop: spacing.sm,
+    padding: 10,
+    borderRadius: radius.button,
+    backgroundColor: colors.primarySoft,
+  },
+  outlineTitle: { color: colors.primary, fontSize: 13, fontWeight: '800' },
+  outlineSub: { color: colors.textMuted, fontSize: 11.5, lineHeight: 16, marginTop: 3 },
 
   /* 층별개요 — 철거 대상 층 고르기 */
   floorBox: {

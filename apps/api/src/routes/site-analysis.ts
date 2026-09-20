@@ -19,6 +19,7 @@ import {
 import type { VolumeEstimator } from '../estimation/provider.js';
 import type { BuildingRegisterClient } from '../public-data/building-register.js';
 import type { ParcelLookupClient } from '../geo/parcel.js';
+import type { BuildingOutlineClient } from '../public-data/building-outline.js';
 import {
   buildFloorPlan,
   reconQuality,
@@ -62,6 +63,8 @@ export interface SiteAnalysisRouterOptions {
   recon?: ReconstructionClient;
   /** 좌표 → 지번 변환(선택). 지도에서 주소를 찍는 기능에 쓴다. */
   parcel?: ParcelLookupClient;
+  /** 건물 외곽선 조회(선택). 공공데이터로 평면 형상을 얻는 경로. */
+  outline?: BuildingOutlineClient;
   /** 공급자 1곳당 시도 횟수(1 = 재시도 없음). 기본 2 — 일시적 429/503 을 한 번 더 받아준다. */
   attemptsPerAnalyzer?: number;
   /** 재시도 전 대기(ms). 기본 700. */
@@ -80,6 +83,7 @@ export function createSiteAnalysisRouter(
   const cache = options.cache;
   const recon = options.recon;
   const parcel = options.parcel;
+  const outline = options.outline;
   const router = Router();
 
   function parseInput(body: Record<string, unknown>): AnalyzeSiteInput {
@@ -467,6 +471,28 @@ export function createSiteAnalysisRouter(
     });
     if (!found) {
       res.status(404).json({ error: '해당 지번의 건축물대장을 찾지 못했습니다.' });
+      return;
+    }
+    res.json(found);
+  });
+
+  /**
+   * GET /api/building-outline?lat=&lng=
+   *
+   * 지도에서 찍은 건물의 외곽선을 공공데이터(GIS건물통합정보)에서 가져온다.
+   * 건물 전체 철거라면 영상을 찍지 않아도 여기서 실제 형상과 건축면적이 나온다 —
+   * 건축물대장의 평면도는 소유자 동의가 있어야 열람되므로 이게 공개된 유일한 형상이다.
+   */
+  router.get('/building-outline', async (req, res) => {
+    if (!outline) {
+      res.status(503).json({
+        error: '건물 외곽선 조회가 설정되지 않았습니다(BUILDING_OUTLINE_WFS_URL).',
+      });
+      return;
+    }
+    const found = await outline.lookup(Number(req.query.lat), Number(req.query.lng));
+    if (!found) {
+      res.status(404).json({ error: '해당 위치의 건물 외곽선을 찾지 못했습니다.' });
       return;
     }
     res.json(found);

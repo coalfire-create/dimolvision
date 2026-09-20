@@ -113,6 +113,23 @@ export const lookupBuildingRegister = (q: {
     }).toString()}`,
   );
 
+/** 공공데이터 건물 외곽선 — 평면 형상과 건축면적. */
+export interface BuildingOutline {
+  /** 외곽선 좌표(경위도). 도면을 그리는 데 쓴다. */
+  ring: Array<[number, number]>;
+  /** 외곽선으로 계산한 건축면적(㎡). */
+  areaM2: number;
+  perimeterM: number;
+  buildingName?: string;
+}
+
+/**
+ * 지도에서 찍은 좌표의 건물 외곽선을 공공데이터에서 가져온다.
+ * 건물 전체 철거라면 영상을 찍지 않아도 여기서 실제 형상과 건축면적이 나온다.
+ */
+export const lookupBuildingOutline = (lat: number, lng: number) =>
+  api<BuildingOutline>(`/building-outline?lat=${lat}&lng=${lng}`);
+
 export interface PhotoWasteItemsResult {
   analysis: SiteAnalysis;
   buildingRegister?: BuildingRegisterInfo;

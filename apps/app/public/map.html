@@ -127,6 +127,10 @@
             return;
           }
           picked = await res.json();
+          // 찍은 좌표도 함께 들고 간다 — 건물 외곽선(공공데이터 평면 형상)은 지번이 아니라
+          // 좌표로 조회한다. 지번만 넘기면 분석 화면에서 다시 찍게 해야 한다.
+          picked.lat = lat;
+          picked.lng = lng;
           $('hint').textContent = '';
           $('addrBox').classList.remove('hidden');
           $('addrBox').innerHTML =
@@ -174,6 +178,7 @@
           bun: picked.bun,
           ji: picked.ji,
           addr: picked.jibunAddress || '',
+          ...(Number.isFinite(picked.lat) ? { lat: String(picked.lat), lng: String(picked.lng) } : {}),
         });
         location.href = `/?${p.toString()}`;
       });

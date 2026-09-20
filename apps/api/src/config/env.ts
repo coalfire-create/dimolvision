@@ -72,6 +72,18 @@ export const env = {
     serviceKey: process.env.DATA_GO_KR_SERVICE_KEY,
     timeoutMs: Number(process.env.PUBLIC_DATA_TIMEOUT_MS ?? 5_000),
   },
+  /**
+   * GIS건물통합정보(WFS) — 건물 외곽선. 평면 형상을 공공데이터로 얻는 유일한 경로다
+   * (건축물대장 평면도는 소유자 동의가 있어야 열람된다). 인증키는 publicData 것을 함께 쓴다.
+   *
+   * 엔드포인트·레이어명을 환경변수로 둔 이유: 이 서비스는 건축HUB 등으로 이관되며 주소와
+   * typename 이 바뀌어 왔다. 바뀔 때 배포만으로 고칠 수 있어야 한다.
+   * 발급: https://www.data.go.kr → 'GIS건물통합정보(WMS/WFS)' 활용신청
+   */
+  buildingOutline: {
+    baseUrl: process.env.BUILDING_OUTLINE_WFS_URL,
+    typeName: process.env.BUILDING_OUTLINE_TYPENAME,
+  },
 } as const;
 
 /** 선택된 비전 공급자 이름(로그·헬스체크용, 키 값은 노출하지 않는다). */

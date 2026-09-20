@@ -12,6 +12,7 @@ import { HeuristicVolumeEstimator } from './estimation/provider.js';
 import { createSiteAnalysisRouter } from './routes/site-analysis.js';
 import { env, activeVisionProvider } from './config/env.js';
 import { BuildingRegisterClient } from './public-data/building-register.js';
+import { BuildingOutlineClient } from './public-data/building-outline.js';
 import { createAnalysisCache, type AnalysisCacheStore } from './cache/analysis-cache.js';
 import { ReconstructionClient } from './recon/reconstruction.js';
 import { ParcelLookupClient } from './geo/parcel.js';
@@ -127,6 +128,18 @@ export function createApp() {
       })
     : undefined;
 
+  // 건물 외곽선(공공데이터 평면 형상). 인증키에 더해 엔드포인트·레이어명이 모두 있어야 켠다 —
+  // 이 서비스는 이관되며 주소가 바뀌어 와서, 기본값을 코드에 박아 두면 조용히 404 만 난다.
+  const outline =
+    env.publicData.serviceKey && env.buildingOutline.baseUrl && env.buildingOutline.typeName
+      ? new BuildingOutlineClient({
+          serviceKey: env.publicData.serviceKey,
+          timeoutMs: env.publicData.timeoutMs,
+          baseUrl: env.buildingOutline.baseUrl,
+          typeName: env.buildingOutline.typeName,
+        })
+      : undefined;
+
   // 지도에서 찍은 좌표를 지번으로 옮기는 변환(키가 있을 때만).
   const parcel = env.kakao.restApiKey
     ? new ParcelLookupClient({
@@ -140,7 +153,7 @@ export function createApp() {
     createSiteAnalysisRouter(
       chain,
       new HeuristicVolumeEstimator(),
-      { cache, recon, parcel },
+      { cache, recon, parcel, outline },
       registry,
     ),
   );

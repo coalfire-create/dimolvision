@@ -1167,12 +1167,14 @@ let CAPTURE_QUALITY = 0.58;
           k++;
         }
 
-        // 방이 실제로 차지하는 반지름. 카메라 거리·시선 도달거리는 전부 이걸 쓴다.
-        const viewR = (() => {
-          if (k === 0) return maxR || 1;
-          const d = Float32Array.from(keptDist.subarray(0, k)).sort();
-          return d[Math.floor(k * 0.9)] || maxR || 1;
-        })();
+        // 방이 실제로 차지하는 반지름 — 화면을 잡는 기준.
+        //
+        // 원점(점군 무게중심)에서 재면 안 된다. 카메라가 도는 곳은 사람이 서 있던
+        // 자리(pivot)이고, 거기서 벽까지의 거리가 화면을 채울 크기다. 무게중심 기준
+        // 90% 거리를 썼더니 어떤 장면은 방이 콩알만 하고 어떤 장면은 벽에 코를
+        // 박았다(실측: 샘플 1·2 가 정반대로 나왔다).
+        // pivot 은 아래에서 정의되므로, 값 계산은 그 뒤에 한다.
+        let viewR = maxR || 1;
 
         const geo = new THREE.BufferGeometry();
         geo.setAttribute('position', new THREE.BufferAttribute(pos.subarray(0, k * 3), 3));
@@ -1278,6 +1280,17 @@ let CAPTURE_QUALITY = 0.58;
         // 회전 중심 — 안에서 보면 촬영 동선의 중심이 곧 방의 한가운데다.
         const pivot = inside ? pivot0 : [0, 0, 0];
 
+        // pivot 에서 잰 95% 거리. 벽 대부분이 이 안에 들어온다.
+        viewR = (() => {
+          if (k === 0) return maxR || 1;
+          const d = new Float32Array(k);
+          for (let i = 0; i < k; i++) {
+            d[i] = Math.hypot(pos[i * 3] - pivot[0], pos[i * 3 + 1] - pivot[1], pos[i * 3 + 2] - pivot[2]);
+          }
+          d.sort();
+          return d[Math.floor(k * 0.95)] || maxR || 1;
+        })();
+
         // 뒤로 물러난 정도. 방 반지름의 배수라 단위가 없는 복원 좌표계에서도 뜻이 같다.
         //   0   = 사람이 서 있던 바로 그 자리 (실내 시점의 기본값)
         //   0.8 이상 = 방 밖으로 나가 전체를 내려다보는 시점
@@ -1291,7 +1304,7 @@ let CAPTURE_QUALITY = 0.58;
         // 구가 통째로 들어오는 거리(1/ sin(시야각/2))는 **너무 멀다**. 방은 구가
         // 아니라 납작한 상자라, 그 거리에 두면 가운데 조각처럼 작게 뜬다(실측).
         // 0.62 배가 실제 벽이 화면을 채우는 지점이다.
-        const FIT = 0.62 / Math.sin((camera.fov * Math.PI) / 360);
+        const FIT = 0.9 / Math.sin((camera.fov * Math.PI) / 360);
         let back = inside && !built ? 0 : FIT;
         const apply = () => {
           const dx = Math.cos(rx) * Math.sin(ry), dy = Math.sin(rx), dz = Math.cos(rx) * Math.cos(ry);

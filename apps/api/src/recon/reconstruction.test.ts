@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   MIN_RECON_FRAMES,
   ReconstructionClient,
+  findMissingSegments,
   reconQuality,
   scaleDimensions,
   type ReconExtent,
@@ -162,5 +163,36 @@ describe('reconQuality — 실패 원인을 숫자로 가른다', () => {
     const q = reconQuality({ ...base, registeredImages: 8, totalImages: 60, pointCount: 200 });
     expect(q.advice).toContain('8장만 이어졌습니다');
     expect(q.advice).toContain('옆으로 이동');
+  });
+});
+
+describe('findMissingSegments — 어느 구간을 다시 찍어야 하는가', () => {
+  const times = Array.from({ length: 12 }, (_, i) => i * 0.5); // 0.0 ~ 5.5초
+
+  it('연속으로 빠진 구간을 시각으로 돌려준다', () => {
+    // 0~3 은 이어졌고 4·5·6 이 빠졌고 7~11 은 이어졌다.
+    const names = ['0000.jpg', '0001.jpg', '0002.jpg', '0003.jpg',
+                   '0007.jpg', '0008.jpg', '0009.jpg', '0010.jpg', '0011.jpg'];
+    const segs = findMissingSegments(names, times);
+    expect(segs).toHaveLength(1);
+    expect(segs[0]).toEqual({ fromSec: 2, toSec: 3, frames: 3 });
+  });
+
+  it('한두 장 빠진 건 알리지 않는다 — 경고가 흔해지면 묻힌다', () => {
+    const names = times.map((_, i) => `${String(i).padStart(4, '0')}.jpg`).filter((_, i) => i !== 5);
+    expect(findMissingSegments(names, times)).toHaveLength(0);
+  });
+
+  it('여러 구간이 끊기면 모두 낸다', () => {
+    const names = ['0000.jpg', '0001.jpg', '0005.jpg', '0006.jpg', '0011.jpg'];
+    const segs = findMissingSegments(names, times);
+    expect(segs).toHaveLength(2);
+    expect(segs[0].frames).toBe(3);   // 2,3,4
+    expect(segs[1].frames).toBe(4);   // 7,8,9,10
+  });
+
+  it('등록 정보가 없으면 아무 말도 하지 않는다 — 추측하지 않는다', () => {
+    expect(findMissingSegments(undefined, times)).toEqual([]);
+    expect(findMissingSegments([], times)).toEqual([]);
   });
 });

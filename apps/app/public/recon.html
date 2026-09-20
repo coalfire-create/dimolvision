@@ -96,6 +96,13 @@
       .ox .fig { font-size: 20px; line-height: 1.4; }
       .ox .fig span { display: block; font-size: 11px; color: var(--muted); margin-top: 2px; }
 
+      .miss { margin-top: 12px; background: #fffbeb; border: 1.5px solid #fde68a;
+              border-radius: 10px; padding: 12px 14px; font-size: 13px; color: #78350f; }
+      .miss > b { display: block; margin-bottom: 6px; }
+      .miss ul { margin: 0 0 6px; padding-left: 18px; }
+      .miss li { margin-bottom: 4px; line-height: 1.6; }
+      .miss p { margin: 0; font-size: 12px; color: #92400e; }
+
       /* 촬영 판정 차단 */
       .blk { margin-top: 14px; background: #fef2f2; border: 2px solid #f87171;
              border-radius: 12px; padding: 16px; }
@@ -228,6 +235,7 @@
         <p class="sub" id="quality"></p>
         <div id="viewer"></div>
         <div class="stats" id="stats"></div>
+        <div id="missing" class="miss hidden"></div>
       </div>
 
       <div id="scaleCard" class="card hidden">
@@ -851,6 +859,29 @@ let CAPTURE_QUALITY = 0.58;
         }
       }
 
+      /**
+       * 이어지지 않은 구간을 알린다.
+       *
+       * "다시 찍으세요" 만 말하면 처음부터 전부 다시 찍게 된다. 실제로는 한두 구간만
+       * 끊긴 경우가 대부분이라, 그 지점으로 돌아가 이어 찍는 편이 훨씬 빠르다.
+       */
+      function showMissing(segs) {
+        const box = $('missing');
+        if (!segs || segs.length === 0) { box.classList.add('hidden'); return; }
+        const mmss = (s) => {
+          const m = Math.floor(s / 60), r = Math.round(s % 60);
+          return `${m}:${String(r).padStart(2, '0')}`;
+        };
+        box.classList.remove('hidden');
+        box.innerHTML =
+          '<b>이 구간이 이어지지 않았습니다</b>' +
+          '<ul>' + segs.map((s) =>
+            `<li><b>${mmss(s.fromSec)} ~ ${mmss(s.toSec)}</b> (${s.frames}장) — ` +
+            '그 지점으로 <b>돌아가서</b> 더 천천히 다시 찍어 주세요</li>').join('') +
+          '</ul>' +
+          '<p>전체를 다시 찍을 필요는 없습니다. 끊긴 구간만 이어서 찍으면 됩니다.</p>';
+      }
+
       // ── 3D 뷰어 ────────────────────────────────────────────────────
       let renderer, scene, camera, cloud, raf;
       function renderCloud(points, cameras) {
@@ -1321,7 +1352,13 @@ let CAPTURE_QUALITY = 0.58;
           // exhaustive 는 모든 쌍을 비교한다. 손으로 든 촬영은 인접 프레임 겹침이
           // 들쭉날쭉해 sequential 로는 놓치는 쌍이 많았다(실측 4/28 → 27/60).
           // 크기 기준은 여기서 보내지 않는다 — 결과를 본 뒤 고르고, 환산은 화면에서 즉시 한다.
-          const body = { frames: frames.map(f => f.base64), matcher: 'exhaustive', maxImageSize: 1600 };
+          const body = {
+            frames: frames.map(f => f.base64),
+            // 촬영 시각을 함께 보내면 서버가 "어느 구간이 끊겼는지" 를 시각으로 돌려준다.
+            frameTimes: frames.map(f => Math.round((f.timeSec ?? 0) * 10) / 10),
+            matcher: 'exhaustive',
+            maxImageSize: 1600,
+          };
 
           const res = await fetch('/api/recon/reconstruct', {
             method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body),
@@ -1341,6 +1378,7 @@ let CAPTURE_QUALITY = 0.58;
             `${data.elapsedSec}초 소요` + (q.advice ? ` — ${q.advice}` : '');
 
           renderCloud(data.points, data.cameras);
+          showMissing(data.missingSegments);
 
           // 복원 좌표계의 크기. 여기서부터는 서버를 다시 부르지 않고 화면에서 환산한다.
           lastExtent = data.extent;

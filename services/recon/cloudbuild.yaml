@@ -4,6 +4,8 @@ steps:
   - name: gcr.io/cloud-builders/docker
     args: [push, '${_IMAGE}']
 options:
-  machineType: E2_HIGHCPU_32
-  diskSizeGb: 200
+  # E2_HIGHCPU_32 는 이 리전 쿼터에서 거부된다("due to quota restrictions").
+  # COLMAP 이미지는 apt 설치가 대부분이라 기본 머신으로도 충분하다.
+  machineType: E2_HIGHCPU_8
+  diskSizeGb: 100
 timeout: 3600s

@@ -17,6 +17,7 @@ import type { VolumeEstimator } from '../estimation/provider.js';
 import type { BuildingRegisterClient } from '../public-data/building-register.js';
 import type { ParcelLookupClient } from '../geo/parcel.js';
 import {
+  findMissingSegments,
   reconQuality,
   scaleDimensions,
   type ReconstructionClient,
@@ -367,9 +368,17 @@ export function createSiteAnalysisRouter(
     const ref = parseScaleReference(body.scaleReference);
     const dimensions = ref ? scaleDimensions(result.extent, ref) : undefined;
 
+    // 어느 구간이 이어지지 않았는지. 촬영 시각을 함께 받았을 때만 낼 수 있다 —
+    // "처음부터 다시" 대신 "그 지점으로 돌아가서" 를 말하려면 시각이 필요하다.
+    const frameTimes = Array.isArray(body.frameTimes)
+      ? body.frameTimes.filter((t): t is number => typeof t === 'number' && Number.isFinite(t))
+      : [];
+    const missing = findMissingSegments(result.registeredNames, frameTimes);
+
     res.json({
       ...result,
       quality,
+      ...(missing.length > 0 ? { missingSegments: missing } : {}),
       ...(dimensions ? { dimensions } : {}),
     });
   });

@@ -26,6 +26,64 @@ export interface ReconstructionResult {
   points: number[][];
   cameras: number[][];
   elapsedSec: number;
+  /** 실제로 이어진 사진의 파일명(0000.jpg 형식). 어느 구간이 끊겼는지 되짚는 근거. */
+  registeredNames?: string[];
+  /** COLMAP 이 만든 모델 수. 2 이상이면 촬영이 중간에 끊겨 조각났다는 뜻이다. */
+  modelCount?: number;
+  /** 어떤 설정으로 성공했는지(balanced | aggressive). */
+  profile?: string;
+}
+
+/** 끊긴 구간 — 이어지지 않은 사진이 연속으로 몰린 곳. */
+export interface MissingSegment {
+  fromSec: number;
+  toSec: number;
+  frames: number;
+}
+
+/**
+ * 어느 구간을 다시 찍어야 하는지 찾는다.
+ *
+ * "다시 찍으세요" 만으로는 처음부터 다 찍게 된다. 실제로는 한두 구간만 끊긴 경우가
+ * 대부분이라, 그 지점으로 돌아가 이어 찍는 편이 훨씬 빠르다. 등록된 사진 이름을
+ * 촬영 시각으로 되돌려 비어 있는 구간을 찾는다.
+ *
+ * minRun 이상 연속으로 빠진 곳만 낸다 — 한두 장 빠진 건 정상이고, 그것까지 알리면
+ * 화면이 경고로 뒤덮여 정작 중요한 구간이 묻힌다.
+ */
+export function findMissingSegments(
+  registeredNames: readonly string[] | undefined,
+  frameTimes: readonly number[],
+  minRun = 3,
+): MissingSegment[] {
+  if (!registeredNames || frameTimes.length === 0) return [];
+  const ok = new Set<number>();
+  for (const name of registeredNames) {
+    const m = /(\d+)/.exec(name);
+    if (m) ok.add(Number(m[1]));
+  }
+  if (ok.size === 0) return [];
+
+  const out: MissingSegment[] = [];
+  let runStart = -1;
+  const flush = (endExclusive: number) => {
+    if (runStart < 0) return;
+    const len = endExclusive - runStart;
+    if (len >= minRun) {
+      out.push({
+        fromSec: frameTimes[runStart] ?? 0,
+        toSec: frameTimes[endExclusive - 1] ?? 0,
+        frames: len,
+      });
+    }
+    runStart = -1;
+  };
+  for (let i = 0; i < frameTimes.length; i += 1) {
+    if (ok.has(i)) flush(i);
+    else if (runStart < 0) runStart = i;
+  }
+  flush(frameTimes.length);
+  return out;
 }
 
 export interface ReconstructionFailure {

@@ -47,12 +47,27 @@ PREPROCESS_MODE = os.environ.get("VGGT_PREPROCESS", "pad")
 # 필요하다 — 점이 충분히 조밀할 것, 그리고 **각 점이 제 색을 가질 것**.
 # 좌표를 JSON 숫자로 보내면 점당 30자가 넘어 금방 한계에 닿으므로,
 # float32/uint8 바이너리를 base64 로 실어 보낸다(점당 15바이트).
-MAX_POINTS = 150000
+#
+# 아래 값들은 전부 환경변수로 연다. 코드에 박아 두면 하나 바꿀 때마다 16분짜리
+# 이미지 빌드를 다시 돌려야 해서, 무엇이 더 나은지 재 볼 수가 없다.
+MAX_POINTS = int(os.environ.get("VGGT_MAX_POINTS", "150000"))
 # 신뢰도 하위 구간은 버린다. 하늘·유리처럼 깊이를 못 정한 화소가 형상을 망친다.
-CONF_PERCENTILE = 50.0
+CONF_PERCENTILE = float(os.environ.get("VGGT_CONF_PCT", "50"))
 
 # 메시로 바꿀 때 쓰는 점 개수. 전부 넣으면 Poisson 이 수 분 걸린다.
-MESH_SAMPLE = 120000
+MESH_SAMPLE = int(os.environ.get("VGGT_MESH_SAMPLE", "120000"))
+# Poisson 옥트리 깊이 사다리 · 밀도 하위 절단 비율 · 격자 크기(대각선 대비) ·
+# 마지막에 남길 삼각형 수. 전부 실측으로 정한 값이라 다시 재려면 열려 있어야 한다.
+MESH_DEPTHS = [int(x) for x in os.environ.get("VGGT_MESH_DEPTHS", "8,7,6").split(",") if x.strip()]
+# 밀도 하위 절단 비율. 이 값 하나가 "구멍이 남느냐 / 없는 벽을 지어내느냐" 를 가른다.
+# 같은 점군으로 재 본 표면적:  0.06 → 11.23   0.04 → 11.87   0.02 → 13.18   0.00 → 16.64
+# 숫자만 보면 0 이 제일 좋지만, 렌더해 보면 한쪽 벽이 통째로 풍선처럼 부푼다 —
+# Poisson 이 닫힌 껍질을 만들려고 없는 면을 지어낸 것이다. 철거 견적에서는
+# 구멍보다 날조가 훨씬 나쁘다. 0.04 는 구멍을 메우면서 부풀림이 늘지 않는 지점이다
+# (실측 두 영상 모두: 표면적 +8%, 부풀림 1.22→1.23 / 1.34→1.34).
+MESH_TRIM = float(os.environ.get("VGGT_MESH_TRIM", "0.04"))
+MESH_VOXEL = float(os.environ.get("VGGT_MESH_VOXEL", "0.002"))
+MESH_MAX_FACES = int(os.environ.get("VGGT_MESH_FACES", "150000"))
 
 _model = None
 _device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -108,6 +123,9 @@ import numpy as np
 import open3d as o3d
 
 DEPTH = int(sys.argv[2]) if len(sys.argv) > 2 else 8
+TRIM = float(sys.argv[3]) if len(sys.argv) > 3 else 0.06
+VOXEL = float(sys.argv[4]) if len(sys.argv) > 4 else 0.002
+MAXF = int(sys.argv[5]) if len(sys.argv) > 5 else 150000
 
 d = np.load(sys.argv[1])
 pts, rgb = d["pts"], d["rgb"]
@@ -121,7 +139,7 @@ pc, _ = pc.remove_statistical_outlier(nb_neighbors=20, std_ratio=2.0)
 # 점이 절반 이하로 줄지만 면 품질은 그대로고 속도는 두 배가 된다(실측 3.4초).
 diag = float(np.linalg.norm(np.asarray(pc.get_max_bound()) - np.asarray(pc.get_min_bound())))
 if diag > 0:
-    pc = pc.voxel_down_sample(diag * 0.002)
+    pc = pc.voxel_down_sample(diag * VOXEL)
 
 pc.estimate_normals(o3d.geometry.KDTreeSearchParamKNN(knn=30))
 pc.orient_normals_towards_camera_location(pc.get_center())
@@ -140,10 +158,10 @@ mesh, dens = o3d.geometry.TriangleMesh.create_from_point_cloud_poisson(
 )
 dn = np.asarray(dens)
 if dn.size:
-    mesh.remove_vertices_by_mask(dn < np.quantile(dn, 0.06))
+    mesh.remove_vertices_by_mask(dn < np.quantile(dn, TRIM))
 mesh.remove_degenerate_triangles()
 mesh.remove_duplicated_vertices()
-mesh = mesh.simplify_quadric_decimation(150000)
+mesh = mesh.simplify_quadric_decimation(MAXF)
 v = np.asarray(mesh.vertices, dtype=np.float32)
 f = np.asarray(mesh.triangles, dtype=np.uint32)
 vc = np.asarray(mesh.vertex_colors)
@@ -201,9 +219,9 @@ def build_mesh(pts: np.ndarray, rgb: np.ndarray) -> dict | None:
         # 8 이 기본값이다: 9 는 더 또렷하지만 가장자리에 구멍이 남고, 7 은
         # 반대로 뭉개진다(실측 비교).
         last = None
-        for depth in (8, 7, 6):
+        for depth in MESH_DEPTHS:
             r = subprocess.run(
-                ["python", script, npz, str(depth)],
+                ["python", script, npz, str(depth), str(MESH_TRIM), str(MESH_VOXEL), str(MESH_MAX_FACES)],
                 capture_output=True, text=True, timeout=MESH_TIMEOUT_SEC,
             )
             if r.returncode != 0:

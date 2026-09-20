@@ -473,6 +473,16 @@ export function SiteAnalysisScreen() {
     }
   }
 
+  /**
+   * 주소 없이 촬영으로 가려 할 때. 막기만 하면 왜 안 되는지 모르므로 이유를 말하고
+   * 바로 지도로 보낸다. 주소가 있어야 대장에서 연면적·층고가 오고, 그게 없으면
+   * 물량도 공사비도 3D 실측도 나오지 않는다.
+   */
+  function promptAddress() {
+    setError('먼저 현장 주소를 지정해 주세요. 건축물대장에서 연면적·층고를 가져와야 물량과 공사비가 나옵니다.');
+    openMap();
+  }
+
   function openPage(page: 'privacy' | 'terms' | 'judge') {
     openInternal(`/${page}.html`);
   }
@@ -644,20 +654,70 @@ export function SiteAnalysisScreen() {
           </FadeInUp>
         )}
 
+        {/* 지도에서 현장을 찍으면 건축물대장이 붙는다 — 연면적·구조·연도를 손으로 몰라도 된다. */}
+        <FadeInUp delay={50}>
+          <View style={styles.addrCard}>
+            <View style={styles.addrHead}>
+              <AppIcon name="location" size={17} color={theme.colors.primary} />
+              <Text style={styles.addrTitle}>1. 현장 주소</Text>
+              <View style={styles.reqChip}>
+                <Text style={styles.reqChipText}>필수</Text>
+              </View>
+            </View>
+            {parcel ? (
+              <>
+                <Text style={styles.addrValue}>{parcel.address || '선택한 위치'}</Text>
+                <Text style={styles.addrCodes}>
+                  {`시군구 ${parcel.sigunguCd} · 법정동 ${parcel.bjdongCd} · ${Number(parcel.bun)}${
+                    Number(parcel.ji) > 0 ? `-${Number(parcel.ji)}` : ''
+                  }`}
+                </Text>
+              </>
+            ) : (
+              <Text style={styles.addrSub}>
+                먼저 주소를 지정해야 물량·공사비가 나옵니다. 건축물대장에서 연면적·주구조·
+                사용승인연도·층고를 가져와 분석과 3D 실측에 그대로 씁니다.
+              </Text>
+            )}
+            {register ? (
+              <View style={styles.regRow}>
+                {registerChips(register).map((c) => (
+                  <View key={c} style={styles.regChip}>
+                    <Text style={styles.regChipText}>{c}</Text>
+                  </View>
+                ))}
+              </View>
+            ) : parcel && result ? (
+              // 주소는 찍었는데 대장이 안 붙은 경우. 조용히 넘어가면 사용자는 왜 물량이
+              // 안 나오는지 모른다. 무엇을 해야 하는지 바로 알려준다.
+              <Text style={styles.regMiss}>
+                이 지번은 건축물대장을 찾지 못했습니다(나대지·무허가 건물일 수 있습니다).
+                아래에 연면적을 입력하면 물량과 공사비가 나옵니다.
+              </Text>
+            ) : null}
+            <PressableScale style={styles.addrBtn} onPress={openMap} accessibilityRole="button">
+              <Text style={styles.addrBtnText}>
+                {parcel ? '주소 다시 선택' : '지도에서 현장 선택'}
+              </Text>
+            </PressableScale>
+          </View>
+        </FadeInUp>
+
         {/* 한 번 걸으며 찍으면 소재 분석·견적·3D·부피가 한꺼번에 나온다. */}
         <FadeInUp delay={100}>
           <PressableScale
-            style={styles.videoCard}
-            onPress={() => openInternal(reconUrl())}
+            style={[styles.videoCard, !parcel && styles.cardLocked]}
+            onPress={() => (parcel ? openInternal(reconUrl()) : promptAddress())}
             accessibilityRole="button"
           >
             <View style={styles.videoBadge}>
               <Text style={styles.videoBadgeText}>권장</Text>
             </View>
-            <Text style={styles.videoTitle}>영상으로 촬영하기</Text>
+            <Text style={styles.videoTitle}>2. 영상으로 촬영하기</Text>
             <Text style={styles.videoSub}>
-              벽을 따라 걸으며 한 번 찍으면 소재 분석·견적에 더해 3D 복원과 면적·부피까지
-              나옵니다. 찍는 동안 화면이 실시간으로 촬영을 봐 줍니다.
+              {parcel
+                ? '벽을 따라 걸으며 한 번 찍으면 소재 분석·견적에 더해 3D 복원과 면적·부피까지 나옵니다. 크기 기준은 대장 층고로 자동 설정됩니다.'
+                : '먼저 위에서 현장 주소를 지정하세요. 지정하면 촬영이 열립니다.'}
             </Text>
             <View style={styles.videoCta}>
               <AppIcon name="camera" size={18} color="#0F172A" />
@@ -689,50 +749,18 @@ export function SiteAnalysisScreen() {
                 <Text style={styles.actionCardSub}>가이드 따라 여러 장</Text>
               </PressableScale>
             ) : null}
-          </View>
-        </FadeInUp>
+            {Platform.OS !== 'web' ? <View style={{ width: theme.spacing.sm }} /> : null}
 
-        {/* 지도에서 현장을 찍으면 건축물대장이 붙는다 — 연면적·구조·연도를 손으로 몰라도 된다. */}
-        <FadeInUp delay={50}>
-          <View style={styles.addrCard}>
-            <View style={styles.addrHead}>
-              <AppIcon name="location" size={17} color={theme.colors.primary} />
-              <Text style={styles.addrTitle}>현장 주소 (선택)</Text>
-            </View>
-            {parcel ? (
-              <>
-                <Text style={styles.addrValue}>{parcel.address || '선택한 위치'}</Text>
-                <Text style={styles.addrCodes}>
-                  {`시군구 ${parcel.sigunguCd} · 법정동 ${parcel.bjdongCd} · ${Number(parcel.bun)}${
-                    Number(parcel.ji) > 0 ? `-${Number(parcel.ji)}` : ''
-                  }`}
-                </Text>
-              </>
-            ) : (
-              <Text style={styles.addrSub}>
-                지도에서 건물을 찍으면 건축물대장의 주구조·연면적·사용승인연도를 불러와 분석에 반영합니다.
-              </Text>
-            )}
-            {register ? (
-              <View style={styles.regRow}>
-                {registerChips(register).map((c) => (
-                  <View key={c} style={styles.regChip}>
-                    <Text style={styles.regChipText}>{c}</Text>
-                  </View>
-                ))}
+            <PressableScale
+              style={[styles.actionCard, !parcel && styles.cardLocked]}
+              onPress={() => (parcel ? pickFromLibrary() : promptAddress())}
+              accessibilityRole="button"
+            >
+              <View style={styles.actionIconCircle}>
+                <AppIcon name="document" size={26} color={theme.colors.primary} />
               </View>
-            ) : parcel && result ? (
-              // 주소는 찍었는데 대장이 안 붙은 경우. 조용히 넘어가면 사용자는 왜 물량이
-              // 안 나오는지 모른다. 무엇을 해야 하는지 바로 알려준다.
-              <Text style={styles.regMiss}>
-                이 지번은 건축물대장을 찾지 못했습니다(나대지·무허가 건물일 수 있습니다).
-                아래에 연면적을 입력하면 물량과 공사비가 나옵니다.
-              </Text>
-            ) : null}
-            <PressableScale style={styles.addrBtn} onPress={openMap} accessibilityRole="button">
-              <Text style={styles.addrBtnText}>
-                {parcel ? '주소 다시 선택' : '지도에서 현장 선택'}
-              </Text>
+              <Text style={styles.actionCardTitle}>이미 찍은 사진 올리기</Text>
+              <Text style={styles.actionCardSub}>앨범에서 여러 장 선택</Text>
             </PressableScale>
           </View>
         </FadeInUp>
@@ -1765,6 +1793,15 @@ const styles = StyleSheet.create({
     marginTop: spacing.md,
   },
   videoCtaText: { color: '#FFFFFF', fontSize: 15, fontWeight: '700' },
+  /** 주소 지정 전 단계 — 눌러도 되지만 왜 안 되는지 알려준다. */
+  cardLocked: { opacity: 0.55 },
+  reqChip: {
+    backgroundColor: '#FEE2E2',
+    borderRadius: 999,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+  },
+  reqChipText: { color: '#B91C1C', fontSize: 11, fontWeight: '800' },
 
   addrCard: {
     backgroundColor: colors.surface, // 순백색 배경

@@ -157,11 +157,6 @@
 
       <div class="card">
         <h2>1. 현장 촬영</h2>
-        <div class="modes">
-          <button type="button" id="modeLive" class="mode on">웹에서 바로 촬영</button>
-          <button type="button" id="modeFile" class="mode">영상 파일 올리기</button>
-        </div>
-
         <div id="liveWrap">
           <div id="camBox" class="cam hidden">
             <video id="cam" playsinline muted></video>
@@ -174,52 +169,37 @@
           <button id="camStart">카메라 켜고 촬영 시작</button>
           <button id="camStop" class="ghost hidden">촬영 끝내고 복원 시작</button>
           <p class="sub" id="camHint" style="margin-top:8px">
-            촬영은 <b>직접 끝낼 때까지 계속</b>됩니다. 한 바퀴 다 돌고 나서 눌러 주세요 —
-            많이 돌수록 사각지대가 줄어듭니다.
+            촬영은 <b>직접 끝낼 때까지 계속</b>됩니다. 한 바퀴 다 돌고 나서 눌러 주세요.
           </p>
           <div id="camErr" class="err hidden"></div>
         </div>
 
+        <!--
+          파일 업로드 경로는 화면에서 내렸다. 올린 영상은 촬영 방식을 고칠 수 없어
+          실패하면 현장에 다시 가야 하는데, 웹 촬영은 찍는 동안 바로잡을 수 있다.
+          데모(?demo=1)가 저장소 영상을 넣을 때만 쓰므로 요소 자체는 남긴다.
+        -->
         <div id="fileWrap" class="hidden">
-          <label class="file" for="file">
-            영상 선택 또는 촬영
-            <span id="fileName">아직 선택하지 않았습니다</span>
-          </label>
-          <input id="file" type="file" accept="video/*" capture="environment" />
+          <span id="fileName"></span>
+          <input id="file" type="file" accept="video/*" />
         </div>
 
         <div class="guide">
-          <p class="gtitle">제자리에서 돌리지 말고, <u>걸어서 이동</u>하며 찍으세요</p>
+          <p class="gtitle">천천히 움직이며 현장을 담아 주세요</p>
           <p class="gbody">
-            3D 복원은 <b>같은 지점을 서로 다른 위치에서 본 차이(시차)</b>로 깊이를 계산합니다.
-            한자리에 서서 카메라만 돌리면 시차가 생기지 않아 수학적으로 복원이 불가능합니다.
+            어렵게 생각하지 않으셔도 됩니다. 카메라를 들고 <b>천천히 움직이기만</b> 하면
+            화면이 알아서 담습니다. 멈춰 있을 때만 알려 드립니다.
           </p>
           <ul class="gl">
-            <li><b>옆으로 이동</b> — 벽을 따라 게걸음처럼 걸으며 촬영합니다</li>
-            <li><b>한 바퀴 돌기</b> — 방이면 벽을 따라, 건물이면 외곽을 따라 크게 돕니다.
-              <b>모서리에서 도는 건 정상</b>입니다. 천천히 돌면 그 구간도 함께 담깁니다</li>
-            <li><b>2~3m 거리 유지</b> — 너무 가까우면 화면이 급변해 이어지지 않습니다</li>
-            <li><b>좁은 통로·작은 방이면</b> — 옆으로 걸을 공간이 없으면 <b>통로를 따라 앞으로</b>
-              천천히 걸으세요. 카메라는 진행 방향을 보되 살짝(30~45°) 벽 쪽으로 틀면
-              벽면도 함께 담깁니다. 가까울수록 화면이 빨리 흐르니 더 천천히 걸으세요</li>
-            <li><b>천천히</b> — 30~60초. 빠르게 훑으면 흔들려 특징점이 사라집니다</li>
-            <li><b>무늬 있는 곳을 포함</b> — 민무늬 벽만 찍으면 맞출 기준점이 없습니다.
-              가구·배관·바닥 패턴·창틀이 화면에 들어오게 하세요</li>
+            <li><b>천천히</b> — 급하게 휘두르지만 않으면 됩니다</li>
+            <li><b>벽·바닥·천장을 고루</b> — 한 곳만 오래 보지 마세요</li>
+            <li><b>걸으면 더 좋습니다</b> — 옆으로든 앞으로든, 몸이 이동하면 3D 가 정확해집니다.
+              좁으면 통로를 따라 앞으로 걸으세요. 모서리에서 도는 것도 괜찮습니다</li>
+            <li><b>밝게</b> — 어두우면 알려 드립니다. 조명을 켜 주세요</li>
           </ul>
-          <div class="ox">
-            <div class="ok">
-              <b>O 이렇게</b>
-              <div class="fig">🧍‍♂️→→→<br><span>옆으로 걷기<br>좁으면 앞으로 걷기</span></div>
-            </div>
-            <div class="no">
-              <b>X 이렇게 하면 실패</b>
-              <div class="fig">🧍‍♂️↻<br><span>제자리에서 카메라만 돌리기</span></div>
-            </div>
-          </div>
           <p class="gwarn">
-            <b>업로드하면 촬영 방식을 자동으로 검사합니다.</b> 제자리 회전으로 판정되면
-            복원을 진행하지 않고 다시 찍도록 안내합니다 — 실측에서 그런 영상은 112장을
-            넣어도 27장만 복원됐고, 나머지는 시차가 없어 버려졌습니다.
+            24장부터 복원되고 <b>48장이면 충분</b>합니다. 20~30초면 모입니다.
+            더 돌면 사각지대가 줄어듭니다.
           </p>
         </div>
       </div>
@@ -1006,40 +986,40 @@ let CAPTURE_QUALITY = 0.58;
       // 영상을 녹화해 다시 프레임을 뽑지 않고, 좋다고 판정된 순간의 프레임을 바로
       // 모은다 — 인코딩·디코딩을 건너뛰어 화질 손실과 대기 시간이 없다.
       const LIVE = {
-        TICK_MS: 140,        // 판정 주기
-        GAP: 2,              // 몇 틱 전과 비교할지(인접 프레임은 차이가 잡음에 묻힌다)
-        SHOT_MS: 420,        // 좋은 구간에서 프레임을 담는 간격
-        // 권장 장수(실측에서 정확도 대비 가장 좋았던 수). **여기서 멈추지 않는다** —
-        // 더 찍을수록 사각지대가 줄어들고, 어차피 보낼 때 이 중에서 가장 좋은 것들을 고른다.
-        TARGET: 60,
-        // 메모리 보호용 상한. 여기까지 가면 더 담아도 얻는 게 없다.
-        MAX: 150,
-        // 끝내도 되는 최소 장수. 24장으로 뒀던 건 실측을 무시한 값이었다:
-        //   28장 → 정합 4/28 · 점 125 (실패)    60장 → 정합 27/60 · 점 2,194
-        // 20~30장대는 실패 구간이라 "끝내도 된다" 고 말하면 안 된다.
-        MIN_OK: 45,
-        // 흔들린 프레임은 특징점이 사라져 넣을수록 해가 된다. 최근 선명도의 이 비율
-        // 아래로 떨어지면 버린다(걸으며 찍으면 흔들린 프레임이 실제로 섞인다).
-        BLUR_RATIO: 0.55,
-        // 이보다 빠르면 겹침이 무너진다. 판정 화면 폭이 192px 이므로 45px 는 겹침 77% 다
-        // (사진측량 통상 요구는 60~80%). 좁은 통로에서는 벽이 가까워 화면이 빨리 흐르는데,
-        // 예전 값(26px)은 겹침 86% 여도 "너무 빠릅니다" 를 띄워 촬영을 계속 막았다.
-        FAST: 45,
-        // 코너를 도는 시간. 이 안의 회전은 정상 촬영으로 본다.
-        TURN_MS: 3500,
-        // 코너에서도 프레임을 담는다 — 안 담으면 촬영이 끊겨 앞뒤를 잇지 못한다.
-        TURN_SHOT_MS: 700,
+        TICK_MS: 140,        // 화면 상태를 보는 주기
+        GAP: 2,              // 몇 틱 전과 비교할지
+        SHOT_MS: 500,        // 프레임을 담는 간격
+        // 목표 장수. VGGT 는 장수에 관대하다 — 48장이면 충분하고, 더 돌면 더 좋아진다.
+        TARGET: 48,
+        MAX: 120,
+        // 끝내도 되는 최소 장수.
+        //
+        // 예전에 45장이었던 건 COLMAP 기준이다. COLMAP 은 사진끼리 맞춰야 해서 장수가
+        // 곧 정합률이었다(28장 → 4장 정합, 60장 → 27장 정합). VGGT 는 신경망이 한 번에
+        // 추론하므로 그 관계가 없다. 실측에서 제 검사가 "시차 13%, 복원 불가" 로 판정한
+        // 영상도 VGGT 는 48/48 로 복원했다. 문턱을 낮춰도 된다.
+        MIN_OK: 24,
+        // 흔들린 프레임은 여전히 버린다 — 이건 어느 방식이든 해가 된다.
+        BLUR_RATIO: 0.5,
         SMOOTH: 4,           // 코칭 문구가 깜빡이지 않게 최근 판정을 모아 다수결
       };
 
+      /**
+       * 코칭 문구.
+       *
+       * 예전에는 다섯 가지 상태(좋음/회전/정지/빠름/무늬없음)를 띄우고 "좋음" 일 때만
+       * 프레임을 담았다. COLMAP 이 시차 없는 프레임을 못 쓰기 때문이었는데, VGGT 로
+       * 바꾸면서 그 제약이 사라졌다. 그런데 규칙만 남아 촬영을 계속 막고 있었다.
+       *
+       * 이제 **담는 것을 막지 않는다**. 카메라가 완전히 멈춰 있을 때만 알리고,
+       * 나머지는 더 좋게 찍는 힌트로만 쓴다. 찍는 사람이 판정관 노릇을 할 이유가 없다.
+       */
       const COACH = {
-        START:   { cls: '',     msg: '벽을 향해 카메라를 드세요', sub: '벽에서 2~3m 떨어져 주세요' },
-        STILL:   { cls: 'warn', msg: '움직이세요',               sub: '옆으로 걷거나, 좁으면 통로를 따라 앞으로 걸으세요' },
-        ROTATE:  { cls: 'bad',  msg: '제자리에서 돌리지 마세요',   sub: '손목이 아니라 몸이 이동해야 합니다' },
-        FAST:    { cls: 'warn', msg: '너무 빠릅니다',             sub: '흔들리면 맞출 기준점이 사라집니다' },
-        TURN:    { cls: 'warn', msg: '코너를 도는 중입니다',       sub: '천천히 돌고, 돌고 나면 다시 걸으세요 — 계속 담고 있습니다' },
-        FLAT:    { cls: 'warn', msg: '무늬가 없습니다',           sub: '가구·창틀·배관이 화면에 들어오게 하세요' },
-        GOOD:    { cls: 'good', msg: '좋습니다 — 계속 걸으세요',   sub: '같은 속도로 벽을 따라 이동하세요' },
+        START: { cls: '',     msg: '현장을 천천히 담아 주세요', sub: '벽·바닥·천장이 고루 들어오게' },
+        STILL: { cls: 'warn', msg: '카메라가 멈춰 있습니다',   sub: '천천히 움직이며 현장을 훑어 주세요' },
+        DARK:  { cls: 'warn', msg: '너무 어둡습니다',          sub: '조명을 켜거나 밝은 쪽으로' },
+        MOVE:  { cls: 'good', msg: '좋습니다 — 계속 담는 중',  sub: '벽을 따라 천천히 이동하세요' },
+        WALK:  { cls: 'good', msg: '아주 좋습니다',            sub: '이렇게 걸으면 3D 가 더 정확해집니다' },
       };
 
       let liveState = null;
@@ -1068,10 +1048,10 @@ let CAPTURE_QUALITY = 0.58;
         $('camBar').style.width = pct + '%';
         $('camStats').textContent =
           shots >= LIVE.TARGET
-            ? `좋은 장면 ${shots}장 · 충분합니다 — 더 돌면 사각지대가 줄어듭니다`
+            ? `${shots}장 담았습니다 · 충분합니다 — 더 돌면 사각지대가 줄어듭니다`
             : shots >= LIVE.MIN_OK
-              ? `좋은 장면 ${shots} / ${LIVE.TARGET}장 · 끝내도 되지만 ${LIVE.TARGET}장이 가장 정확합니다`
-              : `좋은 장면 ${shots} / ${LIVE.TARGET}장 · ${LIVE.MIN_OK}장은 모아야 복원됩니다`;
+              ? `${shots} / ${LIVE.TARGET}장 · 지금 끝내도 됩니다`
+              : `${shots} / ${LIVE.TARGET}장 · ${LIVE.MIN_OK}장부터 복원됩니다`;
         $('camStop').disabled = shots < LIVE.MIN_OK;
       }
 
@@ -1152,38 +1132,30 @@ let CAPTURE_QUALITY = 0.58;
           const now = Date.now();
 
           const m = pairMetrics(prev, tiny);
-          const key = classify(m);
           window.__liveMetrics = m;
-          st.history.push(key);
-          let shown = smooth(st.history);
 
-          // 벽을 따라 걷다 모서리에 닿으면 반드시 돌아야 한다. 그 회전까지 "잘못" 이라고
-          // 하면 건물을 한 바퀴 돌 방법이 없다. 잠깐의 회전은 코너로 보고 계속 담는다.
-          // 오래 이어지면 그때는 제자리에서 훑고 있는 것이다.
-          if (shown === 'ROTATE') {
-            st.rotateSince ??= now;
-            if (now - st.rotateSince < LIVE.TURN_MS) shown = 'TURN';
-          } else {
-            st.rotateSince = null;
-          }
+          // 상태는 셋뿐이다: 멈춤 / 담는 중 / 아주 좋음.
+          // 멈춤이 아니면 무조건 담는다 — 회전이든 전진이든 VGGT 가 알아서 쓴다.
+          const moving = m.motion >= 1.0 || m.parallax >= PARALLAX_FORWARD_PX;
+          const walking = m.parallax >= PARALLAX_MIN_PX;
+          let key = !moving ? 'STILL' : walking ? 'WALK' : 'MOVE';
+          if (m.blocks < 4 && !moving) key = 'STILL';
+
+          st.history.push(key);
+          const shown = smooth(st.history);
           setCoach(shown, st.shots.length);
 
-          // 코너 구간도 담는다. 안 담으면 촬영이 코너에서 끊겨 COLMAP 이 앞뒤를 잇지
-          // 못하고 조각난 모델이 나온다 — 회전 프레임 자체는 깊이를 주지 않지만
-          // 앞뒤를 연결하는 다리 역할을 한다. 다만 간격을 늘려 수를 줄인다.
-          const interval = shown === 'TURN' ? LIVE.TURN_SHOT_MS : LIVE.SHOT_MS;
-          if ((shown === 'GOOD' || shown === 'TURN') &&
-              now - st.lastShot >= interval && st.shots.length < LIVE.MAX) {
+          // 멈춰 있을 때만 담지 않는다. 같은 장면을 쌓아 봐야 얻는 게 없다.
+          if (shown !== 'STILL' && now - st.lastShot >= LIVE.SHOT_MS && st.shots.length < LIVE.MAX) {
             st.lastShot = now;
 
-            // 걸으며 찍으면 흔들린 프레임이 섞인다. 흔들리면 특징점이 사라져
-            // 넣을수록 정합률을 끌어내리므로, 담기 전에 선명도를 본다.
+            // 흔들린 프레임은 어느 방식이든 해가 된다 — 이것만 거른다.
             const bw = 480, bh = Math.max(8, Math.round((bw * vh) / vw));
             bCv.width = bw; bCv.height = bh;
             bCtx.drawImage(video, 0, 0, bw, bh);
             const sharp = sharpness(bCtx.getImageData(0, 0, bw, bh).data, bw, bh);
             const ref = st.sharps.length >= 5 ? median(st.sharps) : 0;
-            if (ref > 0 && sharp < ref * LIVE.BLUR_RATIO) return; // 흔들린 프레임은 버린다
+            if (ref > 0 && sharp < ref * LIVE.BLUR_RATIO) return;
             st.sharps.push(sharp);
             if (st.sharps.length > 30) st.sharps.shift();
 
@@ -1193,8 +1165,6 @@ let CAPTURE_QUALITY = 0.58;
             const b64 = sCv.toDataURL('image/jpeg', CAPTURE_QUALITY).split(',')[1];
             if (b64) st.shots.push({ base64: b64, timeSec: (now - st.started) / 1000, tiny, sharpness: sharp });
             setCoach(shown, st.shots.length);
-            // 권장 장수를 넘겨도 멈추지 않는다. 끝내는 시점은 찍는 사람이 정한다.
-            // 상한은 메모리 보호일 뿐이며, 거기 닿으면 알리고 마무리한다.
             if (st.shots.length >= LIVE.MAX) finishLive();
           }
         }, LIVE.TICK_MS);
@@ -1212,10 +1182,9 @@ let CAPTURE_QUALITY = 0.58;
         if (shots.length < LIVE.MIN_OK) {
           $('camErr').classList.remove('hidden');
           $('camErr').innerHTML =
-            `좋은 장면을 <b>${shots.length}장</b>만 얻었습니다. 복원에는 최소 ` +
-            `<b>${LIVE.MIN_OK}장</b>이 필요합니다(실측: 28장은 4장만 정합돼 실패, 60장은 27장 정합). ` +
-            '벽을 보며 옆으로 <b>끊지 말고 20~30초</b> 계속 걸으면서 다시 촬영해 주세요. ' +
-            '초록색 안내가 떠 있는 동안에만 장면이 쌓입니다.';
+            `<b>${shots.length}장</b>만 담겼습니다. 복원에는 최소 <b>${LIVE.MIN_OK}장</b>이 ` +
+            '필요합니다. 카메라를 들고 <b>천천히 움직이며 20~30초</b> 더 담아 주세요 — ' +
+            '멈춰 있는 동안에는 쌓이지 않습니다.';
           return;
         }
 
@@ -1225,13 +1194,12 @@ let CAPTURE_QUALITY = 0.58;
         if (shots.length > used.length) {
           setStage(`${shots.length}장 중 선명한 ${used.length}장을 골랐습니다`, 42);
         }
-        // 라이브에서 좋은 구간만 담았지만, 실제로 보낼 것들로 한 번 더 검증한다.
-        const capture = assessCapture(used);
         for (const f of used) delete f.tiny;
         const fitted = await fitToBudget(used, (msg) => setStage(msg, 40));
         showAnalyzeLink(stashForAnalysis(fitted));
-
-        if (showCaptureBlock(capture, () => runReconstruct(fitted))) return;
+        // 촬영 검사로 막지 않는다. COLMAP 은 시차 없는 프레임을 못 써서 미리 걸러야
+        // 했지만, VGGT 는 그대로 복원한다 — 실측에서 검사가 "시차 13%, 복원 불가" 로
+        // 판정한 영상도 48/48 로 복원됐다. 막을 근거가 사라졌으므로 바로 보낸다.
         await runReconstruct(fitted);
       }
 
@@ -1241,22 +1209,29 @@ let CAPTURE_QUALITY = 0.58;
 
       // 모드 전환. 카메라를 못 쓰는 환경(권한 거부·데스크톱 크롬 정책)에서도
       // 파일 업로드 경로가 그대로 남아 있어야 한다.
+      /**
+       * 촬영 화면과 데모(파일) 경로를 오간다. 사용자에게는 촬영 하나만 보인다 —
+       * 올린 영상은 촬영 방식을 고칠 수 없어 실패하면 현장에 다시 가야 하지만,
+       * 웹 촬영은 찍는 동안 바로잡을 수 있다.
+       */
       function setMode(live) {
-        $('modeLive').classList.toggle('on', live);
-        $('modeFile').classList.toggle('on', !live);
         $('liveWrap').classList.toggle('hidden', !live);
-        $('fileWrap').classList.toggle('hidden', live);
         $('go').classList.toggle('hidden', live);
         if (!live) stopLive();
       }
-      $('modeLive').addEventListener('click', () => setMode(true));
-      $('modeFile').addEventListener('click', () => setMode(false));
       $('camStart').addEventListener('click', startLive);
       $('camStop').addEventListener('click', finishLive);
 
       // 카메라를 아예 쓸 수 없는 브라우저면 파일 모드로 시작한다.
-      if (!navigator.mediaDevices?.getUserMedia) setMode(false);
-      else setMode(true);
+      setMode(true);
+      // 카메라를 쓸 수 없으면 알린다 — 예전에는 조용히 파일 업로드로 넘겼는데,
+      // 그러면 왜 촬영이 안 열리는지 알 수 없었다.
+      if (!navigator.mediaDevices?.getUserMedia) {
+        $('camErr').classList.remove('hidden');
+        $('camErr').innerHTML =
+          '이 브라우저에서는 카메라를 열 수 없습니다. 휴대폰의 Chrome 또는 Safari 로 ' +
+          '<b>https://dimolvision.vercel.app/recon.html</b> 을 열어 주세요.';
+      }
 
       /**
        * 복원 실패 안내 + 재시도.
@@ -1573,21 +1548,14 @@ let CAPTURE_QUALITY = 0.58;
         $('captureBlock').classList.add('hidden');
         try {
           setStage('영상에서 프레임을 뽑는 중…', 2);
-          const { frames, capture } = await extractFrames(
+          const { frames } = await extractFrames(
             picked,
             (d, t) => setStage(`영상에서 프레임을 뽑는 중… ${d}/${t}`, (d / t) * 35),
             (msg) => setStage(msg, 40),
           );
           if (frames.length < 8) throw new Error('쓸 만한 프레임이 부족합니다. 더 길게, 천천히 촬영해 주세요.');
 
-          // 촬영이 복원 불가능한 종류면 GPU 를 쓰기 전에 멈춘다. 수 분을 기다리게 한 뒤
-          // "실패했습니다" 를 보여 주는 건 시간도 비용도 낭비고, 무엇보다 사용자가
-          // 무엇을 바꿔야 하는지 모른 채 같은 촬영을 반복하게 만든다.
           setStage('', 42);
-          if (showCaptureBlock(capture, () => runReconstruct(frames))) {
-            $('go').disabled = false;
-            return;
-          }
           await runReconstruct(frames);
         } catch (e) {
           showError(e.message || '복원 중 문제가 발생했습니다.');

@@ -89,6 +89,9 @@ def robust_extent(pts: np.ndarray) -> dict:
     }
 
 
+MESH_ERROR: str | None = None
+
+
 def build_mesh(pts: np.ndarray, rgb: np.ndarray) -> dict | None:
     """
     점군 → 삼각형 면(메시).
@@ -98,9 +101,12 @@ def build_mesh(pts: np.ndarray, rgb: np.ndarray) -> dict | None:
     닫힌 매끄러운 표면을 만들어 주는데, 밀도가 낮은 곳까지 억지로 메우므로
     그런 부분은 잘라낸다 — 안 그러면 없는 벽이 생긴다.
     """
+    global MESH_ERROR
+    MESH_ERROR = None
     try:
         import open3d as o3d
-    except Exception:
+    except Exception as e:  # noqa: BLE001
+        MESH_ERROR = f"open3d import 실패: {e}"
         return None
     if len(pts) < 5000:
         return None
@@ -115,7 +121,11 @@ def build_mesh(pts: np.ndarray, rgb: np.ndarray) -> dict | None:
         # 이상치를 먼저 뺀다. 튄 점이 남으면 표면이 그쪽으로 끌려간다.
         pc, _ = pc.remove_statistical_outlier(nb_neighbors=20, std_ratio=2.0)
         pc.estimate_normals(o3d.geometry.KDTreeSearchParamKNN(knn=30))
-        pc.orient_normals_consistent_tangent_plane(30)
+        # orient_normals_consistent_tangent_plane 은 12만 점에서 수 분이 걸린다.
+        # 카메라 쪽을 향하게 뒤집는 것으로 충분하다 — 실내를 안에서 찍었으므로
+        # 원점(촬영 동선 중심) 방향이 곧 보이는 면이다.
+        pc.orient_normals_towards_camera_location(pc.get_center())
+        pc.normals = o3d.utility.Vector3dVector(-np.asarray(pc.normals))
 
         mesh, dens = o3d.geometry.TriangleMesh.create_from_point_cloud_poisson(
             pc, depth=9, linear_fit=True
@@ -144,8 +154,9 @@ def build_mesh(pts: np.ndarray, rgb: np.ndarray) -> dict | None:
             "vertexCount": int(len(v)),
             "faceCount": int(len(f)),
         }
-    except Exception:
-        # 메시는 덤이다. 실패해도 점군은 그대로 보여 준다.
+    except Exception as e:  # noqa: BLE001
+        # 메시는 덤이다. 실패해도 점군은 그대로 보여 준다. 다만 이유는 남긴다.
+        MESH_ERROR = f"{type(e).__name__}: {e}"
         return None
 
 
@@ -244,7 +255,7 @@ def reconstruct(img_dir: str) -> dict:
         "modelCount": 1,
         "profile": "vggt",
         # 삼각형 면. 있으면 화면이 점 대신 이걸 그려 진짜 벽으로 보인다.
-        **({"mesh": mesh} if mesh else {}),
+        **({"mesh": mesh} if mesh else {"meshError": MESH_ERROR}),
         "elapsedSec": round(time.time() - started, 1),
     }
 

@@ -8,7 +8,10 @@
 # 태그는 실제 존재하는 것으로 — 2.4.0-cuda121 형식은 Docker Hub 에 없다.
 FROM pytorch/pytorch:2.9.1-cuda12.6-cudnn9-runtime
 
-RUN apt-get update && apt-get install -y --no-install-recommends git \
+# open3d 는 slim 런타임 이미지에 없는 libGL·libgomp 를 요구한다.
+# 없으면 import 단계에서 죽는데, 예외를 삼키고 있어 "메시 없음" 으로만 보였다.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      git libgl1 libgomp1 libusb-1.0-0 libglib2.0-0 \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

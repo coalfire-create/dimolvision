@@ -343,28 +343,53 @@ let CAPTURE_QUALITY = 0.58;
        * √(6²+6²) — 탐색 창의 모서리에 전부 포화된 값이었다.
        * 그래서 반값 영상에서 넓게(±24px 상당) 전체 이동을 먼저 찾는다.
        */
-      function globalShift(a, b) {
-        const ha = halfScale(a), hb = halfScale(b);
-        const R = 12;
-        const px = Math.floor(ha.w * 0.2), py = Math.floor(ha.h * 0.2);
-        const pw = Math.floor(ha.w * 0.6), ph = Math.floor(ha.h * 0.6);
-        let best = Infinity, bx = 0, by = 0;
+      /** 한 단계 탐색: 주어진 중심 주변 ±R 에서 가장 잘 맞는 이동을 찾는다. */
+      function searchAt(a, b, cx, cy, R) {
+        const px = Math.floor(a.w * 0.2), py = Math.floor(a.h * 0.2);
+        const pw = Math.floor(a.w * 0.6), ph = Math.floor(a.h * 0.6);
+        let best = Infinity, bx = cx, by = cy, hit = false;
         for (let dy = -R; dy <= R; dy++) {
           for (let dx = -R; dx <= R; dx++) {
-            if (py + dy < 0 || py + ph + dy >= hb.h || px + dx < 0 || px + pw + dx >= hb.w) continue;
+            const sx = cx + dx, sy = cy + dy;
+            if (py + sy < 0 || py + ph + sy >= b.h || px + sx < 0 || px + pw + sx >= b.w) continue;
             let sad = 0;
             for (let y = 0; y < ph; y += 2) {
-              const ra = (py + y) * ha.w + px;
-              const rb = (py + y + dy) * hb.w + px + dx;
+              const ra = (py + y) * a.w + px;
+              const rb = (py + y + sy) * b.w + px + sx;
               for (let x = 0; x < pw; x += 2) {
-                const d = ha.g[ra + x] - hb.g[rb + x];
+                const d = a.g[ra + x] - b.g[rb + x];
                 sad += d < 0 ? -d : d;
               }
             }
-            if (sad < best) { best = sad; bx = dx; by = dy; }
+            if (sad < best) {
+              best = sad; bx = sx; by = sy;
+              hit = Math.abs(dx) === R || Math.abs(dy) === R;
+            }
           }
         }
-        return { dx: bx * 2, dy: by * 2, saturated: Math.abs(bx) >= R || Math.abs(by) >= R };
+        return { dx: bx, dy: by, edge: hit };
+      }
+
+      /**
+       * 화면 전체가 얼마나 흘렀는가(지배적 이동).
+       *
+       * 이걸 먼저 구해야 하는 이유: 블록마다 좁게 찾으면 이동이 탐색 반경을 넘는 순간
+       * 전부 경계에 붙어버려 측정값이 무의미해진다. 실제로 샘플 영상의 "이동량 8.49px" 는
+       * √(6²+6²) — 탐색 창의 모서리에 전부 포화된 값이었다.
+       *
+       * 넓게 찾되 싸게 찾으려고 피라미드로 내려간다:
+       *   1/4 축소본에서 ±12 (원본 ±48px) → 1/2 에서 ±3 → 원본에서 ±2
+       * 한 단계에서 전부 찾으면 (2·48+1)² = 9,409 자리를 봐야 하지만
+       * 이렇게 나누면 625+49+25 = 699 자리면 된다. 범위는 넓고 비용은 1/13 이다.
+       */
+      function globalShift(a, b) {
+        const ha = halfScale(a), hb = halfScale(b);
+        const qa = halfScale(ha), qb = halfScale(hb);
+
+        const q = searchAt(qa, qb, 0, 0, 12);          // 1/4 해상도: 원본 ±48px
+        const h = searchAt(ha, hb, q.dx * 2, q.dy * 2, 3);
+        const f = searchAt(a, b, h.dx * 2, h.dy * 2, 2);
+        return { dx: f.dx, dy: f.dy, saturated: q.edge };
       }
 
       /**
@@ -373,7 +398,9 @@ let CAPTURE_QUALITY = 0.58;
        * 옆으로 걸으면 가까운 블록은 더 많이, 먼 블록은 덜 움직여 잔차가 벌어진다.
        */
       function blockResiduals(a, b, cx, cy) {
-        const R = 4;
+        // 잔차 탐색 반경. ±4 로 두면 합성 보행 실측 잔차(3.48px)가 경계에 붙어
+        // 시차가 큰 촬영일수록 오히려 잘려 나간다 — 정상 영상을 회전으로 오판하게 된다.
+        const R = 7;
         const out = [];
         for (let by = 0; by < GRID; by++) {
           for (let bx = 0; bx < GRID; bx++) {
@@ -442,17 +469,38 @@ let CAPTURE_QUALITY = 0.58;
         const tinies = frames.map((f) => f.tiny).filter(Boolean);
         if (tinies.length < 6) return { verdict: 'UNKNOWN', movingRatio: 0, pairs: 0 };
 
-        // 인접 프레임은 차이가 너무 작아 잡음에 묻힌다. 몇 장 건너뛴 쌍을 본다.
-        const GAP = 2;
-        const samples = [];
-        for (let i = 0; i + GAP < tinies.length; i += Math.max(1, Math.floor(tinies.length / 24))) {
-          samples.push([tinies[i], tinies[i + GAP]]);
+        // 인접 프레임은 차이가 너무 작아 잡음에 묻히고, 너무 벌리면 이동이 탐색 범위를
+        // 넘어 측정이 포화된다. 그래서 넓게 시작해 **포화되면 간격을 좁혀 다시 잰다**.
+        const build = (gap) => {
+          const out = [];
+          const step = Math.max(1, Math.floor(tinies.length / 24));
+          for (let i = 0; i + gap < tinies.length; i += step) out.push([tinies[i], tinies[i + gap]]);
+          return out;
+        };
+        const measure = (gap) => build(gap).map(([a, b]) => pairMetrics(a, b));
+
+        const medMotion = (ms) => median(ms.map((m) => m.motion));
+
+        let gap = 2;
+        let metrics = measure(gap);
+        // 이동이 탐색 범위(±32px) 근처면 측정이 잘려 시차가 있어도 안 보인다.
+        // 편안한 범위로 내려오도록 간격을 좁혀 다시 잰다 — 시간 간격이 절반이면 이동도 절반.
+        if (medMotion(metrics) >= 18 && tinies.length > 3) {
+          gap = 1;
+          metrics = measure(gap);
         }
+        // 간격을 최소로 줄이고도 이동이 극단적으로 크면 겹침이 무너진 것이다.
+        // 기준을 정할 때 헷갈리기 쉬운 지점: 판정 화면 폭이 192px 이므로 이동 26~32px 는
+        // 겹침 83~86% 로 사진측량에서 **정상 범위**다(통상 60~80% 를 요구한다).
+        // 그러니 여기서 빠르다고 막으면 멀쩡한 촬영을 되돌려보내게 된다.
+        // 폭의 25%(48px) 를 넘어 겹침이 75% 아래로 떨어질 때만 촬영 속도를 문제 삼는다.
+        const stillFast =
+          medMotion(metrics) >= 48 ||
+          metrics.filter((m) => m.saturated).length > metrics.length * 0.4;
 
         let moving = 0, still = 0, rotating = 0, textureless = 0;
         const raw = [];
-        for (const [a, b] of samples) {
-          const m = pairMetrics(a, b);
+        for (const m of metrics) {
           if (m.blocks < 4) { textureless++; continue; }
           raw.push({
             motion: +m.motion.toFixed(2),
@@ -464,11 +512,15 @@ let CAPTURE_QUALITY = 0.58;
           else rotating++;
         }
         window.__captureRaw = raw;
-        const n = samples.length || 1;
+        window.__captureGap = gap;
+        const n = metrics.length || 1;
         const movingRatio = moving / n;
+        // 순서가 중요하다. 너무 빠른 촬영은 시차가 있어도 측정이 포화돼 "회전" 으로 보인다.
+        // 그 상태에서 "제자리에서 돌리셨습니다" 라고 하면 틀린 지적을 하는 셈이다.
         const verdict =
           textureless / n > 0.5 ? 'TEXTURELESS'
           : still / n > 0.6 ? 'STILL'
+          : stillFast ? 'TOO_FAST'
           : movingRatio < 0.35 ? 'ROTATING'
           : 'OK';
         return {
@@ -478,6 +530,7 @@ let CAPTURE_QUALITY = 0.58;
           rotatingRatio: rotating / n,
           texturelessRatio: textureless / n,
           pairs: n,
+          gap,
         };
       }
 
@@ -629,6 +682,18 @@ let CAPTURE_QUALITY = 0.58;
           how: [
             '벽을 바라본 채 <b>옆으로 걸으며</b> 촬영하세요.',
             '30초 이상, 건물 한 면을 따라 끝까지 이동하세요.',
+          ],
+        },
+        TOO_FAST: {
+          title: '너무 빠르게 촬영하셨습니다',
+          why:
+            '프레임 사이에 화면이 너무 많이 흘러 같은 지점을 이어 붙일 수 없습니다. ' +
+            '사진끼리 겹치는 부분이 있어야 3D 가 만들어지는데, 빠르게 훑으면 그 겹침이 ' +
+            '사라지고 흔들림으로 특징점도 함께 날아갑니다.',
+          how: [
+            '같은 경로를 <b>두세 배 느리게</b> 걸으며 다시 찍으세요.',
+            '한 면을 훑는 데 최소 <b>20~30초</b>를 쓰세요. 급하게 돌지 마세요.',
+            '걷는 동안 카메라는 벽을 향해 <b>고정</b>하고, 몸만 옆으로 이동하세요.',
           ],
         },
         TEXTURELESS: {

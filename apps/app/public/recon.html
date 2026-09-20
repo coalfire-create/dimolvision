@@ -1393,6 +1393,8 @@ let CAPTURE_QUALITY = 0.58;
           ry -= (e.clientX - lx) * 0.006;
           rx = Math.max(-1.4, Math.min(1.4, rx + (e.clientY - ly) * 0.006));
           lx = e.clientX; ly = e.clientY; apply();
+          // 사람이 돌린 각도가 새 중심이 된다. 손을 떼면 거기서부터 오간다.
+          ryBase = ry; swing = 0;
         });
         el.addEventListener('wheel', e => {
           e.preventDefault();
@@ -1415,10 +1417,24 @@ let CAPTURE_QUALITY = 0.58;
         hold(zin, -0.12);
         hold(zout, 0.12);
 
+        // 첫 각도를 기억해 둔다 — 자동 움직임의 중심이 된다.
+        let ryBase = ry;
+        let swing = 0;
+
         cancelAnimationFrame(raf);
         (function loop() {
           raf = requestAnimationFrame(loop);
-          if (!dragging) { ry += 0.0015; apply(); }   // 조작 전에는 천천히 돈다
+          // 조작 전에는 천천히 움직이되 **한 바퀴 돌지는 않는다**.
+          //
+          // 계속 돌리면 애써 고른 첫 방향(점이 가장 몰린 벽)에서 벗어나, 열어 본
+          // 순간 벽을 옆에서 베어 문 각도에 걸린다 — 제출용 캡처가 매번 다른
+          // 이유였다. 처음 각도 둘레 ±20° 안에서만 천천히 오간다. 입체감은
+          // 그대로 주면서 "좋은 각도" 를 잃지 않는다.
+          if (!dragging) {
+            swing += 0.006;
+            ry = ryBase + Math.sin(swing) * 0.35;
+            apply();
+          }
           renderer.render(scene, camera);
         })();
       }

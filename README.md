@@ -16,7 +16,13 @@ packages/shared   공통 타입·상수·순수 로직(@dimol/shared) — 디몰
 apps/api          Express 분석 API (무상태, DB·인증 없음)
                   · site-analysis/analyzer  Groq/Gemini/Claude/Mock 비전 어댑터
                   · estimation/provider     면적 기반 물량 추정(휴리스틱)
+                  · public-data/            건축물대장(표제부·층별개요)·건물 외곽선
+                  · recon/reconstruction    3D 복원 결과 → 평면도 격자·치수 환산
                   · routes/site-analysis    POST /api/site-analysis/{analyze,waste-items}
+                                            GET  /api/building-register  (표제부+층별개요)
+                                            GET  /api/building-outline   (건물 외곽선)
+                                            GET  /api/geo/parcel         (좌표→지번)
+                                            POST /api/recon/reconstruct  (영상→3D+평면도)
 apps/app          Expo(React Native + web) 단일 화면 앱
                   · 현장 AI 분석 화면 + 가이드 촬영(순서·방향 강제 + 품질검증)
                   · public/  무로그인 체험용 샘플 사진 + 개인정보처리방침·이용약관
@@ -27,6 +33,7 @@ infra/gcp         GPU 상용화 배포 스크립트·가이드(Google Cloud)
 ## 빠른 시작
 
 ### 1) API
+
 ```bash
 cp apps/api/.env.example apps/api/.env   # 비전 키 입력(없으면 mock 동작)
 npm install
@@ -39,6 +46,7 @@ Claude(유료) > mock**. 아무 것도 없으면 결정적 샘플(mock)로 UI/�
 `/api/health` 가 현재 쓰는 공급자를 알려준다.
 
 ### 2) 앱
+
 ```bash
 # API 주소 지정(로컬 기본값 http://localhost:8080/api)
 echo "EXPO_PUBLIC_API_BASE_URL=http://localhost:8080/api" > apps/app/.env
@@ -48,10 +56,37 @@ npm run build:web -w @dimolvision/app
 ```
 
 ## 검증 상태
-- `apps/api`: 타입체크 통과, 유닛테스트 31개 통과, health/analyze/waste-items 스모크 OK.
-- `apps/app`: 타입체크 통과, 웹 번들 export 성공(카메라·방향센서·jpeg-js 포함).
+
+- 타입체크 전 워크스페이스 통과.
+- 테스트 219개 통과 — `apps/api` 177, `packages/shared` 37, `apps/app` 5.
+- `apps/app`: 웹 번들 export 성공(카메라·방향센서·jpeg-js 포함).
+
+```bash
+npm run typecheck && npm run test        # 둘 다 루트에서
+npm run build:web -w @dimolvision/app    # 웹 번들이 실제로 나오는지
+```
+
+## 새 기기에서 시작하기
+
+```bash
+git clone https://github.com/coalfire-create/dimolvision.git
+cd dimolvision
+nvm use                                  # .nvmrc = Node 20
+npm install                              # 워크스페이스 전체
+cp apps/api/.env.example apps/api/.env   # 키 채우기(전부 선택 — 없으면 그 기능만 꺼진다)
+npm run api:dev                          # http://localhost:8080
+curl localhost:8080/api/health           # 어떤 공급자가 붙었는지 확인
+
+# 다른 터미널에서
+echo "EXPO_PUBLIC_API_BASE_URL=http://localhost:8080/api" > apps/app/.env
+npm run app:start
+```
+
+키를 하나도 안 넣어도 목(mock)으로 화면과 배관이 전부 돈다. 무엇이 켜졌는지는
+`/api/health` 가 알려 주므로, 기능이 안 보이면 거기부터 본다.
 
 ## 배포 메모
+
 - **웹**: 프로덕션 빌드는 동일 오리진 `/api` 를 호출한다. API 호스트에서 정적 웹을 함께
   서빙하거나(예: Express static), Vercel/Netlify 에서 `/api/*` → API 호스트로 rewrite 한다.
 - **API**: `PORT`, `CORS_ORIGINS`, 비전 키만 있으면 어디든(Railway/Fly/Render) 배포 가능.
@@ -76,6 +111,31 @@ npm run build:web -w @dimolvision/app
 키가 없어도 서비스는 그대로 돈다. 화면에서 건축년도·주구조를 직접 입력해도 같은 효과가 난다.
 `/api/health` 의 `publicData.buildingRegister` 로 활성 여부를 확인한다.
 
+### 철거 대상 범위 — 연면적이 아니라 "무엇을 철거하는가"
+
+표제부의 연면적은 **건물 전체**다. "3층만 철거" 인데 연면적으로 물량을 잡으면 3층 건물에서
+세 배가 나온다. 그래서 대상 범위를 따로 받는다(우선순위: 범위 지정 > 대장 연면적 > 직접 입력).
+
+- **층별개요**(`getBrFlrOulnInfo`): 주소를 찍으면 층 목록이 뜨고, 고른 층의 **대장 등재 면적**이
+  대상 범위가 된다. 등재값이라 사진 눈대중·영상 복원보다 확실하다.
+- **방 단위 실측**: 인테리어 부분 철거처럼 층 단위로도 안 맞으면 공간별로 넣는다. 가로·세로를
+  몰라도 되게 `/recon.html` 에서 영상으로 재거나, 아는 치수를 직접 넣는다.
+- **건물 외곽선**(GIS건물통합정보): 건물 전체 철거면 영상 없이 실제 형상과 건축면적이 나온다.
+
+> 평면도(건축물현황도)는 「건축물대장의 기재 및 관리 등에 관한 규칙」상 **소유자 본인만**
+> 열람할 수 있어 서비스가 대신 받아올 수 없다. 본인 소유 건물이면 정부24에서 발급받아
+> 도면 치수를 넣는 편이 가장 정확하고, 화면에도 그 경로를 안내한다.
+
+### 3D 복원 평면도의 한계 — 믿을 때만 견적에 쓴다
+
+점군을 바닥면에 투영해 평면 윤곽을 뽑고, 거기서 면적·둘레를 잰다. 바운딩박스가 빈 구역까지
+삼키는 L자·ㄷ자 공간에서 특히 정확하다(합성 검증: L자 실제 18㎡ → 바운딩 24㎡ → 평면도 18.4㎡).
+
+다만 복원이 성기면 벽이 끊겨 윤곽이 안으로 말리고 **면적이 작게** 나온다. 같은 24㎡ 방을
+복원 품질만 바꿔 재면 점 12,000개 → 26.0㎡(+8%), 2,194개 → 19.9㎡(-17%), 800개 → 8.8㎡(-63%).
+과소 견적은 계약 뒤 추가정산 분쟁이 되므로 **신뢰도 GOOD 일 때만 면적을 견적에 넘기고**,
+아니면 형상만 보여 주고 재촬영을 안내한다(`FloorPlanGrid.reliability`).
+
 ### 석면 표현 가드
 
 석면은 사진만으로 판별할 수 없고 석면안전관리법상 해체 전 전문기관 조사가 의무다.
@@ -97,5 +157,6 @@ PROJECT_ID=<프로젝트ID> ./infra/gcp/deploy-vlm.sh
 `infra/gcp/README.md` 에 정리했다.
 
 ## 디몰링크와의 관계
+
 `packages/shared` 는 디몰링크 모노레포와 동일한 소스를 복사한 것이다(vision 타입/상수의
 단일 원천은 여전히 TS shared). 분석 계약(SiteAnalysis)이 바뀌면 양쪽을 함께 갱신한다.

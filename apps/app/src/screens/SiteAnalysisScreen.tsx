@@ -248,6 +248,21 @@ function takeCapturedFrames(): PickedImage[] {
   }
 }
 
+/**
+ * 앱 안의 다른 페이지로 이동한다.
+ *
+ * Linking.openURL 은 웹에서 **새 탭**을 연다. 같은 서비스 안을 오가는 데 탭을 쌓는 건
+ * 이상하고, 모바일에서는 팝업 차단에 걸려 아무 일도 일어나지 않는 것처럼 보인다.
+ * 그래서 웹에서는 같은 탭에서 이동한다(네이티브는 Linking 이 맞다).
+ */
+function openInternal(path: string): void {
+  if (Platform.OS === 'web' && typeof window !== 'undefined') {
+    window.location.assign(path);
+    return;
+  }
+  void Linking.openURL(path);
+}
+
 function mimeFromUri(uri: string): string {
   return uri.toLowerCase().endsWith('.png') ? 'image/png' : 'image/jpeg';
 }
@@ -459,12 +474,12 @@ export function SiteAnalysisScreen() {
   }
 
   function openPage(page: 'privacy' | 'terms' | 'judge') {
-    void Linking.openURL(`/${page}.html`);
+    openInternal(`/${page}.html`);
   }
 
   /** 지도에서 현장을 찍는 화면. 고른 지번은 쿼리로 돌아와 이 화면이 다시 읽는다. */
   function openMap() {
-    void Linking.openURL('/map.html');
+    openInternal('/map.html');
   }
 
   return (
@@ -617,7 +632,7 @@ export function SiteAnalysisScreen() {
         <FadeInUp delay={100}>
           <PressableScale
             style={styles.videoCard}
-            onPress={() => void Linking.openURL('/recon.html')}
+            onPress={() => openInternal('/recon.html')}
             accessibilityRole="button"
           >
             <View style={styles.videoBadge}>

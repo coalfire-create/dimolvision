@@ -103,6 +103,15 @@
       .miss li { margin-bottom: 4px; line-height: 1.6; }
       .miss p { margin: 0; font-size: 12px; color: #92400e; }
 
+      .retryRow { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
+      .retryRow button { flex: 1; min-width: 140px; margin: 0; font-size: 14px; padding: 11px; }
+      .retryNote { margin: 8px 0 0; font-size: 12px; color: var(--muted); }
+      .resume { margin-top: 12px; background: #eff6ff; border: 1.5px solid #93c5fd;
+                border-radius: 12px; padding: 14px; font-size: 13px; color: #1e3a8a; }
+      .resume > b { display: block; font-size: 15px; margin-bottom: 4px; }
+      .resume p { margin: 0 0 10px; font-size: 12px; color: #1d4ed8; }
+      .resume button { margin-top: 6px; }
+
       /* 촬영 판정 차단 */
       .blk { margin-top: 14px; background: #fef2f2; border: 2px solid #f87171;
              border-radius: 12px; padding: 16px; }
@@ -227,6 +236,7 @@
         <div class="bar"><i id="bar"></i></div>
         <div id="stage"></div>
         <div id="error" class="err hidden"></div>
+        <div id="resume" class="resume hidden"></div>
         <div id="captureBlock" class="blk hidden"></div>
         <a id="toAnalyze" class="hidden" href="/"></a>
       </div>
@@ -1249,6 +1259,128 @@ let CAPTURE_QUALITY = 0.58;
       else setMode(true);
 
       /**
+       * 복원 실패 안내 + 재시도.
+       *
+       * "실패했습니다" 만 띄우면 사용자는 찍은 게 날아갔다고 생각해 다시 촬영하러 간다.
+       * 프레임은 저장돼 있으므로 **같은 촬영으로 바로 다시 보낼 수 있다**는 걸
+       * 버튼으로 보여 준다. 재촬영은 그게 안 될 때의 선택지다.
+       */
+      function showRetry(frames, message) {
+        const el = $('error');
+        el.classList.remove('hidden');
+        el.innerHTML =
+          `${message}<div class="retryRow">` +
+          `<button type="button" id="retryGo">같은 촬영으로 다시 시도 (${frames.length}장)</button>` +
+          '<button type="button" id="retryNew" class="ghost">새로 촬영하기</button>' +
+          '</div>' +
+          '<p class="retryNote">찍은 영상은 이 브라우저에 보관돼 있습니다. 다시 찍지 않아도 됩니다.</p>';
+        $('retryGo').addEventListener('click', () => {
+          el.classList.add('hidden');
+          void runReconstruct(frames);
+        });
+        $('retryNew').addEventListener('click', async () => {
+          await clearCapture();
+          el.classList.add('hidden');
+          $('file').value = '';
+          picked = null;
+          $('go').disabled = true;
+          $('camStart').classList.remove('hidden');
+          window.scrollTo({ top: 0, behavior: 'smooth' });
+        });
+      }
+
+      // ── 촬영 보관 ──────────────────────────────────────────────────
+      //
+      // 복원은 네트워크와 GPU 를 거치므로 중간에 끊길 수 있다. 그때 찍은 프레임이
+      // 사라지면 건물을 한 바퀴 다시 돌아야 한다 — 1분 걸어 찍은 게 오류 하나로
+      // 날아가는 건 받아들일 수 없다. 보낼 준비가 끝난 프레임을 먼저 저장하고,
+      // 성공했을 때만 지운다. 실패하면 같은 프레임으로 다시 보낼 수 있다.
+      //
+      // sessionStorage 는 수 MB 에서 막히므로 IndexedDB 를 쓴다(프레임 60장 ≈ 4MB).
+      const DB_NAME = 'dimol-recon';
+      const STORE = 'capture';
+
+      function openDb() {
+        return new Promise((resolve, reject) => {
+          const req = indexedDB.open(DB_NAME, 1);
+          req.onupgradeneeded = () => req.result.createObjectStore(STORE);
+          req.onsuccess = () => resolve(req.result);
+          req.onerror = () => reject(req.error);
+        });
+      }
+
+      async function saveCapture(frames) {
+        try {
+          const db = await openDb();
+          await new Promise((res, rej) => {
+            const tx = db.transaction(STORE, 'readwrite');
+            tx.objectStore(STORE).put({
+              savedAt: Date.now(),
+              frames: frames.map((f) => f.base64),
+              frameTimes: frames.map((f) => Math.round((f.timeSec ?? 0) * 10) / 10),
+            }, 'last');
+            tx.oncomplete = res;
+            tx.onerror = () => rej(tx.error);
+          });
+          db.close();
+        } catch {
+          // 저장이 안 되면 재시도만 못 할 뿐, 복원은 그대로 진행한다.
+        }
+      }
+
+      async function loadCapture() {
+        try {
+          const db = await openDb();
+          const v = await new Promise((res, rej) => {
+            const tx = db.transaction(STORE, 'readonly');
+            const r = tx.objectStore(STORE).get('last');
+            r.onsuccess = () => res(r.result);
+            r.onerror = () => rej(r.error);
+          });
+          db.close();
+          if (!v?.frames?.length) return null;
+          // 하루가 지난 촬영은 다른 현장일 가능성이 높다.
+          if (Date.now() - (v.savedAt ?? 0) > 24 * 3600 * 1000) return null;
+          return v;
+        } catch {
+          return null;
+        }
+      }
+
+      async function clearCapture() {
+        try {
+          const db = await openDb();
+          const tx = db.transaction(STORE, 'readwrite');
+          tx.objectStore(STORE).delete('last');
+          db.close();
+        } catch { /* 지우기 실패는 다음 촬영이 덮어쓴다 */ }
+      }
+
+      /** 저장된 촬영이 있으면 "다시 찍지 않아도 된다" 고 알린다. */
+      async function offerSavedCapture() {
+        const saved = await loadCapture();
+        if (!saved) return;
+        const box = $('resume');
+        box.classList.remove('hidden');
+        const mins = Math.round((Date.now() - saved.savedAt) / 60000);
+        box.innerHTML =
+          `<b>직전에 찍은 ${saved.frames.length}장이 남아 있습니다</b>` +
+          `<p>${mins < 1 ? '방금' : mins + '분 전'} 촬영입니다. 다시 찍지 않고 그대로 복원할 수 있습니다.</p>` +
+          '<button type="button" id="resumeGo">이 촬영으로 다시 복원하기</button>' +
+          '<button type="button" id="resumeDrop" class="ghost">지우고 새로 찍기</button>';
+        $('resumeGo').addEventListener('click', () => {
+          box.classList.add('hidden');
+          void runReconstruct(saved.frames.map((b, i) => ({
+            base64: b, timeSec: saved.frameTimes?.[i] ?? 0,
+          })));
+        });
+        $('resumeDrop').addEventListener('click', async () => {
+          await clearCapture();
+          box.classList.add('hidden');
+        });
+      }
+
+      /**
        * 데모 모드(?demo=1).
        *
        * 심사·시연 상황에서는 철거 현장 영상을 가진 사람이 거의 없다. 그렇다고 결과만
@@ -1283,6 +1415,9 @@ let CAPTURE_QUALITY = 0.58;
       if (new URLSearchParams(location.search).get('demo') === '1') {
         void loadRegisterFromUrl().then(runDemo);
       }
+
+      // 직전 촬영이 남아 있으면 먼저 알린다 — 다시 찍으러 가기 전에 보여야 한다.
+      void offerSavedCapture();
 
       // 지도에서 넘어왔으면 대장을 미리 받아 둔다(복원이 끝나면 바로 쓰려고).
       void loadRegisterFromUrl();
@@ -1491,14 +1626,30 @@ let CAPTURE_QUALITY = 0.58;
             maxImageSize: 1600,
           };
 
-          const res = await fetch('/api/recon/reconstruct', {
-            method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body),
-          });
+          // 보내기 전에 저장한다. 여기서 끊겨도 다시 찍지 않아도 되도록.
+          await saveCapture(frames);
+
+          // 네트워크가 한 번 튀는 건 흔하다. 같은 프레임으로 조용히 한 번 더 시도한다.
+          let res;
+          for (let attempt = 1; attempt <= 2; attempt += 1) {
+            try {
+              res = await fetch('/api/recon/reconstruct', {
+                method: 'POST',
+                headers: { 'content-type': 'application/json' },
+                body: JSON.stringify(body),
+              });
+              break;
+            } catch (netErr) {
+              if (attempt === 2) throw netErr;
+              setStage('연결이 끊겨 다시 보내는 중… (촬영은 저장돼 있습니다)', 50);
+              await new Promise((r) => setTimeout(r, 2000));
+            }
+          }
           const data = await res.json();
           setStage('', 100);
 
           if (!data.ok) {
-            showError(`복원 실패 (${data.stage}): ${data.log || '원인을 확인하지 못했습니다.'}`);
+            showRetry(frames, `복원 실패 (${data.stage}): ${data.log || '원인을 확인하지 못했습니다.'}`);
             return;
           }
 
@@ -1514,6 +1665,8 @@ let CAPTURE_QUALITY = 0.58;
           // 복원 좌표계의 크기. 여기서부터는 서버를 다시 부르지 않고 화면에서 환산한다.
           lastExtent = data.extent;
           lastStats = { reg: data.registeredImages, pts: data.pointCount, sec: data.elapsedSec };
+          // 복원에 성공했으니 보관본은 필요 없다.
+          void clearCapture();
           $('scaleCard').classList.remove('hidden');
           renderPresets();
           // 대장 층고를 알면 사용자가 고르기 전에 이미 치수가 떠 있어야 한다.
@@ -1524,7 +1677,8 @@ let CAPTURE_QUALITY = 0.58;
           }
           renderScaled();
         } catch (e) {
-          showError(e.message || '복원 중 문제가 발생했습니다.');
+          // 촬영은 저장돼 있다. 다시 찍지 않아도 된다는 걸 분명히 알린다.
+          showRetry(frames, e.message || '복원 중 문제가 발생했습니다.');
         } finally {
           if (stopTick) { stopTick(); stopTick = null; }
           $('go').disabled = false;

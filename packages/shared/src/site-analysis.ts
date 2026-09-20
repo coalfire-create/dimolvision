@@ -133,6 +133,31 @@ export interface SiteQuoteBasis {
   costDrivers: string[];
 }
 
+/**
+ * 사진 한 장에서 잡아낸 특이사항.
+ *
+ * 왜 사진과 묶어야 하는가: 견적을 받는 사람은 "석면 의심 자재가 있습니다" 라는 문장만
+ * 보면 그게 어디를 말하는지 알 수 없다. 현장에 가 본 적이 없기 때문이다. 그 장면을
+ * 함께 보여 줘야 "아, 저 천장" 이 된다. 철거업자가 현장 답사 후 사진을 찍어 보내며
+ * 설명하는 것과 같은 방식이다.
+ */
+export interface SiteFinding {
+  /** 몇 번째 사진인지(0부터). 화면이 그 사진을 찾아 함께 보여준다. */
+  imageIndex: number;
+  /** 한 줄 제목 (예: "천장 텍스 — 석면 의심"). */
+  title: string;
+  /** 무엇이 보이는가. 사진에서 확인되는 사실만. */
+  observed: string;
+  /** 왜 특이한가 — 견적·공정에 미치는 영향. */
+  why: string;
+  /** 시공 시 주의사항 — 실제로 무엇을 해야 하는가. */
+  caution: string;
+  /** 심각도. HIGH 면 화면에서 붉게 강조한다. */
+  severity: 'HIGH' | 'MEDIUM' | 'LOW';
+  /** 이 항목이 비용에 미치는 영향(선택). */
+  costImpact?: string;
+}
+
 export interface SiteAnalysis {
   /** 한 줄 요약(현장 개요). */
   summary: string;
@@ -144,6 +169,11 @@ export interface SiteAnalysis {
   /** 분석 방법: MOCK(목) | AI_VISION(실제 비전 분석). */
   /** 견적·시공계획 기초자료. AI 가 채우며, 구형 응답에는 없을 수 있다. */
   quoteBasis?: SiteQuoteBasis;
+  /**
+   * 사진별 특이사항. 어느 사진의 무엇이, 왜 문제이고, 시공 때 무엇을 조심해야 하는지.
+   * 견적을 받는 쪽이 현장을 보지 않고도 판단할 수 있게 하는 자료다.
+   */
+  findings?: SiteFinding[];
   method: 'MOCK' | 'AI_VISION';
   confidence: AnalysisConfidence;
   /** UI 필수 노출 문구 — 참고용/안전 한계 고지. */

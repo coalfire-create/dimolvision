@@ -23,6 +23,7 @@ import {
   type CostEstimate,
   type CostLine,
   type DetectedMaterial,
+  type SiteFinding,
   type SiteAnalysis,
   type SiteQuoteBasis,
   type VolumeEstimate,
@@ -115,6 +116,19 @@ function buildReportText(
     }
     lines.push('- 제외 항목:');
     for (const e of cost.excluded) lines.push(`   · ${e}`);
+    lines.push('');
+  }
+
+  if (result.findings && result.findings.length > 0) {
+    lines.push('■ 촬영에서 발견한 특이사항');
+    for (const f of result.findings) {
+      const sev = f.severity === 'HIGH' ? '주의 필요' : f.severity === 'MEDIUM' ? '확인 필요' : '참고';
+      lines.push(`- [${sev}] ${f.title} (${f.imageIndex + 1}번째 장면)`);
+      lines.push(`   보이는 것: ${f.observed}`);
+      lines.push(`   왜 특이한가: ${f.why}`);
+      lines.push(`   시공 시 주의: ${f.caution}`);
+      if (f.costImpact) lines.push(`   비용 영향: ${f.costImpact}`);
+    }
     lines.push('');
   }
 
@@ -261,24 +275,6 @@ function openInternal(path: string): void {
   }
   void Linking.openURL(path);
 }
-
-/**
- * 데모 — 실제 현장 영상과 실제 건축물대장으로 전 과정을 한 번에 보여준다.
- *
- * 철거 현장 영상을 가진 사람은 거의 없다. 그렇다고 결과만 미리 만들어 두면 그건
- * 시연이 아니라 그림이다. 저장소에 담긴 실제 촬영 영상을 **사용자와 똑같은 경로로**
- * 돌린다 — 프레임 추출·3D 복원·소재 분석·견적까지 전부 그 자리에서 계산한다.
- *
- * 주소는 실제 건물이다(서울 마포구 연남동 225-35 · MH빌딩). 대장이 붙어야
- * 연면적·층고가 오고, 그래야 물량·공사비·3D 실측이 전부 나온다.
- */
-const DEMO_PARCEL: PickedParcel = {
-  sigunguCd: '11440',
-  bjdongCd: '12400',
-  bun: '0225',
-  ji: '0035',
-  address: '서울 마포구 연남동 225-35',
-};
 
 function mimeFromUri(uri: string): string {
   return uri.toLowerCase().endsWith('.png') ? 'image/png' : 'image/jpeg';
@@ -489,18 +485,6 @@ export function SiteAnalysisScreen() {
    * 3D 페이지가 그 건물의 실제 층고를 대장에서 받아 크기 기준을 자동으로 정한다.
    * 안 넘기면 사용자가 "층고 2.4m" 같은 표준값을 추측해 골라야 한다.
    */
-  /** 데모 — 실제 지번을 달고 3D 페이지를 데모 모드로 연다. */
-  function demoUrl(): string {
-    const q = new URLSearchParams({
-      demo: '1',
-      sigunguCd: DEMO_PARCEL.sigunguCd,
-      bjdongCd: DEMO_PARCEL.bjdongCd,
-      bun: DEMO_PARCEL.bun,
-      ji: DEMO_PARCEL.ji,
-    });
-    return `/recon.html?${q.toString()}`;
-  }
-
   function reconUrl(): string {
     if (!parcel) return '/recon.html';
     const q = new URLSearchParams({
@@ -612,24 +596,6 @@ export function SiteAnalysisScreen() {
             </View>
           </FadeInUp>
         )}
-
-        {/* 사진도 주소도 없이 들어온 사람을 위한 경로. 실제 영상·실제 대장으로 돈다. */}
-        <FadeInUp delay={90}>
-          <PressableScale
-            style={styles.demoCard}
-            onPress={() => openInternal(demoUrl())}
-            accessibilityRole="button"
-          >
-            <View style={{ flex: 1 }}>
-              <Text style={styles.demoTitle}>데모로 전체 흐름 보기</Text>
-              <Text style={styles.demoSub}>
-                실제 철거 현장 영상과 실제 건축물대장(연남동 MH빌딩)으로 3D 복원·실측·
-                소재 분석·공사비까지 그 자리에서 계산합니다. 준비물 없이 눌러만 보세요.
-              </Text>
-            </View>
-            <AppIcon name="sparkles" size={22} color={theme.colors.primary} />
-          </PressableScale>
-        </FadeInUp>
 
         {/* 지도에서 현장을 찍으면 건축물대장이 붙는다 — 연면적·구조·연도를 손으로 몰라도 된다. */}
         <FadeInUp delay={50}>
@@ -820,7 +786,9 @@ export function SiteAnalysisScreen() {
 
         {loading ? <AnalysisProgress /> : null}
 
-        {result ? <AnalysisResult result={result} estimate={estimate} cost={cost} /> : null}
+        {result ? (
+          <AnalysisResult result={result} estimate={estimate} cost={cost} images={images} />
+        ) : null}
 
         {/* 로그인이 없어도 수집·이용 고지는 제공한다(사진은 분석 즉시 폐기, 저장하지 않음). */}
         <View style={styles.legalFooter}>
@@ -865,6 +833,83 @@ export function SiteAnalysisScreen() {
         onCapture={handleCameraCapture}
       />
     </View>
+  );
+}
+
+/**
+ * 특이사항 — 사진과 함께 보여 준다.
+ *
+ * 견적을 받는 사람은 현장에 가 본 적이 없다. "석면 의심 자재가 있습니다" 라는 문장만
+ * 보면 그게 어디인지 모른다. 그 장면을 같이 보여 줘야 판단할 수 있다.
+ * 철거업자가 답사하고 사진을 찍어 보내며 설명하는 것과 같은 방식이다.
+ */
+function FindingsSection({
+  findings,
+  images,
+}: {
+  findings: SiteFinding[];
+  images: PickedImage[];
+}) {
+  const label: Record<SiteFinding['severity'], string> = {
+    HIGH: '주의 필요',
+    MEDIUM: '확인 필요',
+    LOW: '참고',
+  };
+  return (
+    <>
+      <Text style={styles.sectionTitle}>촬영에서 발견한 특이사항 ({findings.length})</Text>
+      <Text style={styles.findingIntro}>
+        현장을 보지 않아도 판단할 수 있도록, 어느 장면의 무엇이 왜 문제인지와
+        시공 때 조심할 점을 함께 정리했습니다.
+      </Text>
+      {findings.map((f, i) => {
+        const shot = images[f.imageIndex];
+        const high = f.severity === 'HIGH';
+        return (
+          <FadeInUp key={`${f.title}-${i}`} delay={40 + i * 50}>
+            <View style={[styles.findingCard, high && styles.findingCardHigh]}>
+              {shot ? (
+                <Image
+                  source={{ uri: shot.uri }}
+                  style={styles.findingShot}
+                  resizeMode="cover"
+                  accessibilityLabel={`${f.title} 가 보이는 현장 장면`}
+                />
+              ) : null}
+              <View style={styles.findingBody}>
+                <View style={styles.findingHead}>
+                  <View style={[styles.sevChip, high && styles.sevChipHigh]}>
+                    <Text style={[styles.sevChipText, high && styles.sevChipTextHigh]}>
+                      {label[f.severity]}
+                    </Text>
+                  </View>
+                  <Text style={styles.findingShotNo}>{f.imageIndex + 1}번째 장면</Text>
+                </View>
+                <Text style={styles.findingTitle}>{f.title}</Text>
+                <Text style={styles.findingLine}>
+                  <Text style={styles.findingLabel}>보이는 것 </Text>
+                  {f.observed}
+                </Text>
+                <Text style={styles.findingLine}>
+                  <Text style={styles.findingLabel}>왜 특이한가 </Text>
+                  {f.why}
+                </Text>
+                <View style={styles.findingCaution}>
+                  <AppIcon name="alert" size={14} color={colors.error} />
+                  <Text style={styles.findingCautionText}>
+                    <Text style={styles.findingLabel}>시공 시 주의 </Text>
+                    {f.caution}
+                  </Text>
+                </View>
+                {f.costImpact ? (
+                  <Text style={styles.findingCost}>비용 영향 · {f.costImpact}</Text>
+                ) : null}
+              </View>
+            </View>
+          </FadeInUp>
+        );
+      })}
+    </>
   );
 }
 
@@ -928,6 +973,7 @@ function buildPrintableHtml(
   result: SiteAnalysis,
   estimate: VolumeEstimate | null,
   cost: CostEstimate | null,
+  images?: PickedImage[],
 ): string {
   const e = escapeHtml;
   const rows = result.materials
@@ -961,6 +1007,28 @@ function buildPrintableHtml(
           ).toLocaleString('ko-KR')}㎡)</span></p>
         <p>운반 차량: ${estimate.truckLoads.map((t) => `${t.capacityTons}톤 ${t.count}대`).join(' / ')}</p>
       </div>`
+    : '';
+
+  // 특이사항은 사진과 함께 인쇄한다 — 견적을 받는 쪽이 현장을 보지 않고 판단할 자료다.
+  const findBlock = result.findings?.length
+    ? `<h2>촬영에서 발견한 특이사항 (${result.findings.length})</h2>` +
+      result.findings
+        .map((f) => {
+          const sev = f.severity === 'HIGH' ? '주의 필요' : f.severity === 'MEDIUM' ? '확인 필요' : '참고';
+          const shot = images?.[f.imageIndex];
+          return `<div class="find${f.severity === 'HIGH' ? ' hi' : ''}">
+            ${shot ? `<img src="${shot.uri}" alt="">` : ''}
+            <div>
+              <p class="sev">${sev} · ${f.imageIndex + 1}번째 장면</p>
+              <h3>${e(f.title)}</h3>
+              <p><b>보이는 것</b> ${e(f.observed)}</p>
+              <p><b>왜 특이한가</b> ${e(f.why)}</p>
+              <p class="cau"><b>시공 시 주의</b> ${e(f.caution)}</p>
+              ${f.costImpact ? `<p class="ci"><b>비용 영향</b> ${e(f.costImpact)}</p>` : ''}
+            </div>
+          </div>`;
+        })
+        .join('')
     : '';
 
   const q = result.quoteBasis;
@@ -1029,6 +1097,14 @@ ${cost.lines
   .chk{background:#FFFBEB;border-color:#FDE68A}
   .chk h2{border-bottom-color:#B45309;color:#B45309}
   .chk .sub{font-size:12px;color:#92400E;margin:4px 0 8px}
+  .find{display:flex;gap:14px;border:1px solid #DCE3F0;border-radius:8px;padding:12px;margin:10px 0;page-break-inside:avoid}
+  .find.hi{border-color:#FCA5A5;background:#FFFBFB}
+  .find img{width:220px;height:150px;object-fit:cover;border-radius:6px;flex:none}
+  .find h3{margin:2px 0 6px;font-size:14px}
+  .find p{margin:0 0 4px;font-size:12px;line-height:1.6}
+  .find .sev{color:#B45309;font-size:11px;font-weight:700}
+  .find .cau{color:#991B1B}
+  .find .ci{color:#1E3A8A}
   .src{font-size:11px;color:#595959;line-height:1.5}
   tr.tot th{background:#EAEFFD;color:#1E3A8A;font-size:14px}
   .sub{font-size:12px;color:#595959}
@@ -1044,6 +1120,7 @@ ${estBlock}
 <table><thead><tr><th>소재</th><th>분류</th><th>처리</th><th>추정 중량</th><th>신뢰도</th></tr></thead>
 <tbody>${rows}</tbody></table>
 <h2>권장 철거 공정</h2><ol>${steps}</ol>
+${findBlock}
 ${quoteBlock}
 ${costBlock}
 ${result.hazards.length ? `<h2>안전 위험요소</h2><ul class="hazards">${result.hazards.map((h) => `<li>${e(h)}</li>`).join('')}</ul>` : ''}
@@ -1059,10 +1136,12 @@ function ShareReportButton({
   result,
   estimate,
   cost,
+  images,
 }: {
   result: SiteAnalysis;
   estimate: VolumeEstimate | null;
   cost: CostEstimate | null;
+  images: PickedImage[];
 }) {
   const [copied, setCopied] = useState(false);
 
@@ -1084,7 +1163,7 @@ function ShareReportButton({
   function handlePrint() {
     const w = window.open('', '_blank');
     if (!w) return; // 팝업 차단 — 복사 버튼이 대안으로 남아 있다.
-    w.document.write(buildPrintableHtml(result, estimate, cost));
+    w.document.write(buildPrintableHtml(result, estimate, cost, images));
     w.document.close();
     w.focus();
     setTimeout(() => w.print(), 300);
@@ -1374,10 +1453,12 @@ function AnalysisResult({
   result,
   estimate,
   cost,
+  images,
 }: {
   result: SiteAnalysis;
   estimate: VolumeEstimate | null;
   cost: CostEstimate | null;
+  images: PickedImage[];
 }) {
   const maxKg = Math.max(0, ...result.materials.map((m) => m.estimatedKg ?? 0));
   return (
@@ -1453,6 +1534,10 @@ function AnalysisResult({
         </FadeInUp>
       ) : null}
 
+      {result.findings && result.findings.length > 0 ? (
+        <FindingsSection findings={result.findings} images={images} />
+      ) : null}
+
       {result.hazards.length > 0 ? (
         <FadeInUp>
           <View style={styles.hazardCard}>
@@ -1469,7 +1554,7 @@ function AnalysisResult({
         </FadeInUp>
       ) : null}
 
-      <ShareReportButton result={result} estimate={estimate} cost={cost} />
+      <ShareReportButton result={result} estimate={estimate} cost={cost} images={images} />
 
       <Text style={styles.disclaimer}>{result.disclaimer}</Text>
     </View>
@@ -1704,19 +1789,6 @@ const styles = StyleSheet.create({
   },
   videoCtaText: { color: '#FFFFFF', fontSize: 15, fontWeight: '700' },
   /** 주소 지정 전 단계 — 눌러도 되지만 왜 안 되는지 알려준다. */
-  demoCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.sm,
-    backgroundColor: colors.primarySoft,
-    borderColor: colors.primary,
-    borderWidth: 1.5,
-    borderRadius: radius.card,
-    padding: spacing.md,
-    marginTop: spacing.md,
-  },
-  demoTitle: { color: colors.primary, fontSize: font.bodyLarge, fontWeight: '800' },
-  demoSub: { color: colors.text, fontSize: 12, lineHeight: 18, marginTop: 4 },
   cardLocked: { opacity: 0.55 },
   reqChip: {
     backgroundColor: '#FEE2E2',
@@ -1827,6 +1899,54 @@ const styles = StyleSheet.create({
   structChipTextOn: { color: colors.primary },
 
   /* 물량 추정 결과 카드 */
+  /* 촬영 특이사항 — 사진과 설명을 함께 */
+  findingIntro: {
+    color: colors.textMuted,
+    fontSize: 13,
+    lineHeight: 19,
+    marginBottom: spacing.sm,
+  },
+  findingCard: {
+    backgroundColor: colors.background,
+    borderColor: colors.border,
+    borderWidth: 1,
+    borderRadius: radius.card,
+    overflow: 'hidden',
+    marginBottom: spacing.sm,
+  },
+  findingCardHigh: { borderColor: '#FCA5A5', borderWidth: 1.5 },
+  findingShot: { width: '100%', height: 190, backgroundColor: '#E2E8F0' },
+  findingBody: { padding: spacing.md },
+  findingHead: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 6 },
+  sevChip: {
+    backgroundColor: colors.primarySoft,
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 3,
+  },
+  sevChipHigh: { backgroundColor: '#FEE2E2' },
+  sevChipText: { color: colors.primary, fontSize: 11, fontWeight: '800' },
+  sevChipTextHigh: { color: '#B91C1C' },
+  findingShotNo: { color: colors.textMuted, fontSize: 11 },
+  findingTitle: {
+    color: colors.text,
+    fontSize: font.bodyLarge,
+    fontWeight: '800',
+    marginBottom: 6,
+  },
+  findingLabel: { color: colors.textMuted, fontWeight: '700' },
+  findingLine: { color: colors.text, fontSize: 13, lineHeight: 20, marginBottom: 4 },
+  findingCaution: {
+    flexDirection: 'row',
+    gap: 6,
+    backgroundColor: '#FDF2F2',
+    borderRadius: 10,
+    padding: spacing.sm,
+    marginTop: 4,
+  },
+  findingCautionText: { flex: 1, color: '#991B1B', fontSize: 12.5, lineHeight: 19 },
+  findingCost: { color: colors.primary, fontSize: 12, fontWeight: '700', marginTop: 6 },
+
   /* 금액 견적 */
   costCard: {
     backgroundColor: '#0F172A', // Slate 900

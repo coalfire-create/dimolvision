@@ -8,9 +8,9 @@
     <style>
       :root {
         color-scheme: light;
-        --bg: #ffffff; --card: #f6f7f9; --text: #1a1a1a; --muted: #595959;
-        --border: #dce3f0; --primary: #2c55e9; --soft: #eaeffd;
-        --warn: #b45309; --warnbg: #fffbeb; --warnbd: #fde68a; --err: #c62828;
+        --bg: #F8FAFC; --card: #FFFFFF; --text: #0F172A; --muted: #64748B;
+        --border: rgba(0,0,0,0.05); --primary: #2563EB; --soft: #EFF6FF;
+        --warn: #b45309; --warnbg: #fffbeb; --warnbd: #fde68a; --err: #EF4444;
       }
       * { box-sizing: border-box; }
       body {
@@ -19,16 +19,20 @@
           'Malgun Gothic', system-ui, sans-serif;
         -webkit-text-size-adjust: 100%;
       }
-      .wrap { max-width: 760px; margin: 0 auto; padding-block: 28px; padding-left: 16px; padding-right: 16px; }
-      header { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; }
-      h1 { font-size: 20px; margin: 0; letter-spacing: -0.01em; }
-      .lead { color: var(--muted); font-size: 14px; margin: 0 0 20px; }
-      .card { background: var(--card); border: 1px solid var(--border); border-radius: 14px; padding: 16px; margin-bottom: 14px; }
-      .card h2 { font-size: 15px; margin: 0 0 4px; }
-      .card p.sub { color: var(--muted); font-size: 13px; margin: 0 0 12px; }
+      .wrap { max-width: 720px; margin: 0 auto; padding-block: 32px; padding-left: 20px; padding-right: 20px; }
+      header { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
+      h1 { font-size: 24px; margin: 0; font-weight: 800; letter-spacing: -0.02em; }
+      .lead { color: var(--muted); font-size: 15px; margin: 0 0 24px; line-height: 1.5; }
+      .card { 
+        background: var(--card); border: 1px solid var(--border); 
+        border-radius: 16px; padding: 24px; margin-bottom: 16px;
+        box-shadow: 0 8px 24px rgba(15, 23, 42, 0.03); 
+      }
+      .card h2 { font-size: 16px; margin: 0 0 6px; font-weight: 800; }
+      .card p.sub { color: var(--muted); font-size: 14px; margin: 0 0 16px; }
       label.file {
-        display: block; border: 2px dashed #cbd5e1; border-radius: 12px; padding: 22px 16px;
-        text-align: center; cursor: pointer; background: #fff; font-weight: 700; font-size: 15px;
+        display: block; border: 1px dashed rgba(37, 99, 235, 0.3); border-radius: 12px; padding: 24px 16px;
+        text-align: center; cursor: pointer; background: var(--soft); color: var(--primary); font-weight: 800; font-size: 15px;
       }
       label.file span { display: block; color: var(--muted); font-weight: 400; font-size: 13px; margin-top: 4px; }
       input[type=file] { display: none; }
@@ -36,12 +40,13 @@
       .field { flex: 1; min-width: 130px; }
       .field label { display: block; font-size: 12px; font-weight: 700; margin-bottom: 5px; }
       select, input[type=number] {
-        width: 100%; padding: 11px 10px; border: 1.5px solid var(--border);
-        border-radius: 10px; font-size: 15px; background: #fff; color: var(--text);
+        width: 100%; padding: 14px 12px; border: 1px solid var(--border);
+        border-radius: 12px; font-size: 15px; background: #fff; color: var(--text); outline: none;
       }
+      select:focus, input[type=number]:focus { border-color: var(--primary); box-shadow: 0 0 0 2px var(--soft); }
       button {
-        width: 100%; padding: 15px; border: 0; border-radius: 12px; background: var(--primary);
-        color: #fff; font-size: 16px; font-weight: 800; cursor: pointer; margin-top: 12px;
+        width: 100%; padding: 16px; border: 0; border-radius: 12px; background: var(--primary);
+        color: #fff; font-size: 16px; font-weight: 800; cursor: pointer; margin-top: 16px;
       }
       button:disabled { background: #a8b6e8; cursor: default; }
       #stage { font-size: 13px; color: var(--muted); margin-top: 10px; min-height: 20px; }
@@ -49,21 +54,21 @@
       .bar i { display: block; height: 100%; width: 0; background: var(--primary); transition: width .25s; }
       #viewer { width: 100%; aspect-ratio: 4/3; background: #0f172a; border-radius: 12px; overflow: hidden; touch-action: none; }
       .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(105px, 1fr)); gap: 8px; margin-top: 12px; }
-      .stat { background: #fff; border: 1px solid var(--border); border-radius: 10px; padding: 10px; text-align: center; }
-      .stat b { display: block; font-size: 18px; margin-top: 2px; }
-      .stat span { font-size: 11px; color: var(--muted); }
-      .guide { background: #fff; border: 1px solid var(--border); border-radius: 12px; padding: 14px 16px; margin-bottom: 12px; }
-      .gtitle { margin: 0 0 6px; font-size: 15px; font-weight: 800; color: var(--primary); }
-      .gbody { margin: 0 0 10px; font-size: 13px; color: var(--muted); line-height: 1.6; }
+      .stat { background: #fff; border: 1px solid var(--border); border-radius: 12px; padding: 12px; text-align: center; }
+      .stat b { display: block; font-size: 18px; margin-top: 2px; font-weight: 800; }
+      .stat span { font-size: 12px; color: var(--muted); }
+      .guide { background: var(--bg); border: 0; border-radius: 12px; padding: 16px 20px; margin-bottom: 16px; }
+      .gtitle { margin: 0 0 8px; font-size: 15px; font-weight: 800; color: var(--text); }
+      .gbody { margin: 0 0 12px; font-size: 14px; color: var(--muted); line-height: 1.6; }
       .gl { margin: 0; padding-left: 18px; font-size: 13px; line-height: 1.75; }
       .gl li { margin-bottom: 2px; }
-      .gwarn { margin: 10px 0 0; padding: 9px 11px; background: var(--warnbg); border: 1px solid var(--warnbd);
-               border-radius: 8px; font-size: 12px; color: #78350f; }
+      .gwarn { margin: 12px 0 0; padding: 12px 14px; background: var(--warnbg); border: 0;
+               border-radius: 12px; font-size: 13px; color: #92400e; font-weight: 600; }
       /* 촬영 모드 전환 */
-      .modes { display: flex; gap: 6px; margin-bottom: 12px; }
-      .mode { flex: 1; margin: 0; padding: 10px; font-size: 13px; font-weight: 700;
-              background: #fff; color: var(--muted); border: 1.5px solid var(--border); }
-      .mode.on { background: var(--soft); color: var(--primary); border-color: var(--primary); }
+      .modes { display: flex; gap: 8px; margin-bottom: 16px; }
+      .mode { flex: 1; margin: 0; padding: 12px; font-size: 14px; font-weight: 800;
+              background: #fff; color: var(--muted); border: 1px solid var(--border); border-radius: 12px; }
+      .mode.on { background: var(--soft); color: var(--primary); border-color: rgba(37, 99, 235, 0.2); }
 
       /* 라이브 촬영 */
       .cam { position: relative; border-radius: 12px; overflow: hidden; background: #000;
@@ -82,9 +87,9 @@
                   margin-bottom: 6px; }
       .cambar { height: 6px; background: rgba(255,255,255,.25); border-radius: 999px; overflow: hidden; }
       .cambar i { display: block; height: 100%; width: 0; background: #34d399; transition: width .25s; }
-      button.ghost { background: none; color: var(--primary); border: 1.5px solid var(--primary);
-                     font-weight: 700; }
-      button.ghost:disabled { color: #9aa4b2; border-color: var(--border); background: none; }
+      button.ghost { background: var(--soft); color: var(--primary); border: 0;
+                     font-weight: 800; }
+      button.ghost:disabled { color: #9aa4b2; background: #f1f5f9; }
 
       .ox { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 10px 0; }
       .ox > div { border-radius: 10px; padding: 10px; text-align: center; }
@@ -96,51 +101,51 @@
       .ox .fig { font-size: 20px; line-height: 1.4; }
       .ox .fig span { display: block; font-size: 11px; color: var(--muted); margin-top: 2px; }
 
-      .miss { margin-top: 12px; background: #fffbeb; border: 1.5px solid #fde68a;
-              border-radius: 10px; padding: 12px 14px; font-size: 13px; color: #78350f; }
-      .miss > b { display: block; margin-bottom: 6px; }
-      .miss ul { margin: 0 0 6px; padding-left: 18px; }
+      .miss { margin-top: 16px; background: #FFFBEB; border: 0;
+              border-radius: 12px; padding: 16px; font-size: 14px; color: #92400e; }
+      .miss > b { display: block; margin-bottom: 8px; font-weight: 800; }
+      .miss ul { margin: 0 0 8px; padding-left: 20px; }
       .miss li { margin-bottom: 4px; line-height: 1.6; }
-      .miss p { margin: 0; font-size: 12px; color: #92400e; }
+      .miss p { margin: 0; font-size: 13px; color: #92400e; font-weight: 600; }
 
-      .retryRow { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
-      .retryRow button { flex: 1; min-width: 140px; margin: 0; font-size: 14px; padding: 11px; }
-      .retryNote { margin: 8px 0 0; font-size: 12px; color: var(--muted); }
-      .resume { margin-top: 12px; background: #eff6ff; border: 1.5px solid #93c5fd;
-                border-radius: 12px; padding: 14px; font-size: 13px; color: #1e3a8a; }
-      .resume > b { display: block; font-size: 15px; margin-bottom: 4px; }
-      .resume p { margin: 0 0 10px; font-size: 12px; color: #1d4ed8; }
-      .resume button { margin-top: 6px; }
+      .retryRow { display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap; }
+      .retryRow button { flex: 1; min-width: 140px; margin: 0; font-size: 15px; padding: 14px; }
+      .retryNote { margin: 8px 0 0; font-size: 13px; color: var(--muted); }
+      .resume { margin-top: 16px; background: var(--soft); border: 0;
+                border-radius: 12px; padding: 16px; font-size: 14px; color: #1e40af; }
+      .resume > b { display: block; font-size: 16px; margin-bottom: 6px; font-weight: 800; }
+      .resume p { margin: 0 0 12px; font-size: 13px; color: var(--primary); }
+      .resume button { margin-top: 8px; }
 
       /* 촬영 판정 차단 */
-      .blk { margin-top: 14px; background: #fef2f2; border: 2px solid #f87171;
-             border-radius: 12px; padding: 16px; }
-      .blk h3 { margin: 0 0 8px; font-size: 16px; color: #b91c1c; }
-      .blk .why { font-size: 13px; line-height: 1.7; margin: 0 0 8px; color: #7f1d1d; }
-      .blk .measured { font-size: 12px; color: #991b1b; background: #fee2e2;
-                       border-radius: 8px; padding: 8px 10px; margin: 0 0 10px; }
-      .blk .howto { background: #fff; border-radius: 10px; padding: 12px; font-size: 13px; }
-      .blk .howto > b { display: block; margin-bottom: 6px; }
-      .blk .howto ul { margin: 0; padding-left: 18px; }
+      .blk { margin-top: 16px; background: #FEF2F2; border: 0;
+             border-radius: 16px; padding: 20px; }
+      .blk h3 { margin: 0 0 8px; font-size: 18px; color: #991b1b; font-weight: 800; }
+      .blk .why { font-size: 14px; line-height: 1.6; margin: 0 0 12px; color: #991b1b; }
+      .blk .measured { font-size: 13px; color: #991b1b; background: rgba(254,226,226,0.5);
+                       border-radius: 8px; padding: 10px 12px; margin: 0 0 12px; }
+      .blk .howto { background: #fff; border-radius: 12px; padding: 16px; font-size: 14px; box-shadow: 0 2px 8px rgba(0,0,0,0.02); }
+      .blk .howto > b { display: block; margin-bottom: 8px; font-weight: 800; color: #1a1a1a; }
+      .blk .howto ul { margin: 0; padding-left: 20px; color: #1a1a1a; }
       .blk .howto li { margin-bottom: 6px; line-height: 1.6; }
-      .blk button { margin-top: 10px; }
-      .blk button.ghost { background: none; color: var(--muted); border: 1px solid var(--border);
-                          font-weight: 600; font-size: 13px; padding: 10px; }
+      .blk button { margin-top: 16px; }
+      .blk button.ghost { background: #fff; color: var(--text); border: 1px solid var(--border);
+                          font-weight: 800; font-size: 15px; padding: 14px; }
 
-      .presets { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 8px; margin: 12px 0; }
-      .preset { display: block; width: 100%; text-align: left; background: #fff; border: 1.5px solid var(--border);
-                border-radius: 10px; padding: 10px 12px; cursor: pointer; font: inherit; color: inherit; margin: 0; }
-      .preset.on { border-color: var(--primary); background: var(--soft); }
-      .preset b { display: block; font-size: 14px; }
-      .preset span { font-size: 12px; color: var(--muted); }
-      #toAnalyze { display: block; margin-top: 12px; text-align: center; padding: 13px;
-                   background: #0f172a; color: #fff; border-radius: 12px;
-                   font-weight: 800; text-decoration: none; }
-      #toAnalysis { display: block; margin-top: 12px; text-align: center; padding: 13px;
+      .presets { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; margin: 16px 0; }
+      .preset { display: block; width: 100%; text-align: left; background: #fff; border: 1px solid var(--border);
+                border-radius: 12px; padding: 14px 16px; cursor: pointer; font: inherit; color: inherit; margin: 0; }
+      .preset.on { border-color: var(--primary); background: var(--soft); box-shadow: 0 0 0 1px var(--primary); }
+      .preset b { display: block; font-size: 15px; font-weight: 800; margin-bottom: 2px; }
+      .preset span { font-size: 13px; color: var(--muted); }
+      #toAnalyze { display: block; margin-top: 16px; text-align: center; padding: 16px;
+                   background: #0F172A; color: #fff; border-radius: 12px;
+                   font-weight: 800; text-decoration: none; font-size: 16px; }
+      #toAnalysis { display: block; margin-top: 16px; text-align: center; padding: 16px;
                     background: var(--primary); color: #fff; border-radius: 12px;
-                    font-weight: 800; text-decoration: none; }
-      .note { background: var(--warnbg); border: 1px solid var(--warnbd); border-radius: 10px; padding: 12px 14px; font-size: 13px; color: #78350f; margin-top: 12px; }
-      .err { background: #fef2f2; border: 1px solid #fecaca; color: #7f1d1d; border-radius: 10px; padding: 12px 14px; font-size: 13px; margin-top: 12px; }
+                    font-weight: 800; text-decoration: none; font-size: 16px; }
+      .note { background: #FFFBEB; border: 0; border-radius: 12px; padding: 16px; font-size: 14px; color: #92400e; margin-top: 16px; font-weight: 600; }
+      .err { background: #FEF2F2; border: 0; color: #991b1b; border-radius: 12px; padding: 16px; font-size: 14px; margin-top: 16px; font-weight: 600; }
       .hidden { display: none !important; }
       footer { margin-top: 30px; border-top: 1px solid var(--border); padding-top: 16px; color: var(--muted); font-size: 13px; }
       a { color: var(--primary); }
@@ -177,7 +182,7 @@
         <!--
           파일 업로드 경로는 화면에서 내렸다. 올린 영상은 촬영 방식을 고칠 수 없어
           실패하면 현장에 다시 가야 하는데, 웹 촬영은 찍는 동안 바로잡을 수 있다.
-          데모(?demo=1)가 저장소 영상을 넣을 때만 쓰므로 요소 자체는 남긴다.
+          프레임 추출이 <input type=file> 를 거치므로 요소 자체는 숨겨서 남긴다.
         -->
         <div id="fileWrap" class="hidden">
           <span id="fileName"></span>
@@ -833,12 +838,38 @@ let CAPTURE_QUALITY = 0.58;
         }
       }
 
+      /**
+       * 분석 화면으로 넘기는 링크.
+       *
+       * 주소를 함께 실어야 한다. 예전에는 href 가 "/" 로 고정돼 있어 3D 로 넘어오며
+       * 들고 온 지번이 통째로 사라졌다 — 주소가 없으면 대장이 안 붙고, 대장이 없으면
+       * 연면적을 모르니 물량도 공사비도 나오지 않는다. "영상은 찍었는데 견적이
+       * 안 나온다" 의 원인이 이것이었다.
+       *
+       * 실측 치수를 알면 그것도 넘긴다 — 대장 연면적보다 실제로 잰 바닥면적이 낫다.
+       */
       function showAnalyzeLink(count) {
         if (count <= 0) return;
         const el = $('toAnalyze');
         el.classList.remove('hidden');
         el.textContent = `이 촬영으로 현장 분석·견적 보기 (${count}장) →`;
+        el.href = analyzeHref();
       }
+
+      function analyzeHref() {
+        const src = new URLSearchParams(location.search);
+        const q = new URLSearchParams();
+        for (const k of ['sigunguCd', 'bjdongCd', 'bun', 'ji', 'addr']) {
+          const v = src.get(k);
+          if (v) q.set(k, v);
+        }
+        if (lastFloorAreaM2 > 0) q.set('areaM2', String(lastFloorAreaM2));
+        const s = q.toString();
+        return s ? `/?${s}` : '/';
+      }
+
+      /** 실측으로 나온 바닥면적(㎡). 환산될 때마다 갱신한다. */
+      let lastFloorAreaM2 = 0;
 
       async function extractFrames(file, onProgress, onStage) {
         const url = URL.createObjectURL(file);
@@ -900,9 +931,36 @@ let CAPTURE_QUALITY = 0.58;
           '<p>전체를 다시 찍을 필요는 없습니다. 끊긴 구간만 이어서 찍으면 됩니다.</p>';
       }
 
+      /**
+       * 점을 원으로 찍기 위한 텍스처.
+       * 기본 점은 사각형이라 조밀해지면 격자 무늬가 생겨 면처럼 보이지 않는다.
+       */
+      let _disc = null;
+      function discTexture() {
+        if (_disc) return _disc;
+        const n = 64;
+        const cv = document.createElement('canvas');
+        cv.width = cv.height = n;
+        const g = cv.getContext('2d');
+        g.fillStyle = '#fff';
+        g.beginPath();
+        g.arc(n / 2, n / 2, n / 2 - 1, 0, Math.PI * 2);
+        g.fill();
+        _disc = new THREE.CanvasTexture(cv);
+        return _disc;
+      }
+
+      /** base64 → 바이트. 좌표(float32)와 색(uint8)을 바이너리로 받는다. */
+      function b64ToBytes(b64) {
+        const bin = atob(b64);
+        const out = new Uint8Array(bin.length);
+        for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+        return out;
+      }
+
       // ── 3D 뷰어 ────────────────────────────────────────────────────
       let renderer, scene, camera, cloud, raf;
-      function renderCloud(points, cameras) {
+      function renderCloud(points, cameras, colors) {
         const host = document.getElementById('viewer');
         host.innerHTML = '';
         const w = host.clientWidth, h = host.clientHeight;
@@ -916,19 +974,64 @@ let CAPTURE_QUALITY = 0.58;
         host.appendChild(renderer.domElement);
 
         // 점군을 원점 기준으로 옮기고 화면에 맞게 정규화한다.
-        const pos = new Float32Array(points.length * 3);
+        const n = points.length / 3;
+        const pos = new Float32Array(points.length);
         const c = [0, 0, 0];
-        points.forEach(p => { c[0] += p[0]; c[1] += p[1]; c[2] += p[2]; });
-        c.forEach((_, i) => c[i] /= points.length || 1);
-        let maxR = 0;
-        points.forEach((p, i) => {
-          const x = p[0] - c[0], y = p[1] - c[1], z = p[2] - c[2];
-          pos[i * 3] = x; pos[i * 3 + 1] = y; pos[i * 3 + 2] = z;
+        for (let i = 0; i < n; i++) {
+          c[0] += points[i * 3]; c[1] += points[i * 3 + 1]; c[2] += points[i * 3 + 2];
+        }
+        c.forEach((_, i) => (c[i] /= n || 1));
+
+        // 바깥으로 튄 점이 몇 개만 있어도 화면이 통째로 줄어든다. 중앙값 거리로 크기를
+        // 잡고 그 몇 배를 넘는 점은 그리지 않는다 — 방이 화면을 채우게 하려는 것이다.
+        const dists = new Float32Array(n);
+        for (let i = 0; i < n; i++) {
+          dists[i] = Math.hypot(
+            points[i * 3] - c[0], points[i * 3 + 1] - c[1], points[i * 3 + 2] - c[2],
+          );
+        }
+        const sorted = Float32Array.from(dists).sort();
+        const med = sorted[Math.floor(n * 0.5)] || 1;
+        const cut = Math.max(med * 4, sorted[Math.floor(n * 0.97)] || med * 4);
+
+        let k = 0, maxR = 0;
+        const col = colors ? new Float32Array(points.length) : null;
+        for (let i = 0; i < n; i++) {
+          if (dists[i] > cut) continue;
+          const x = points[i * 3] - c[0], y = points[i * 3 + 1] - c[1], z = points[i * 3 + 2] - c[2];
+          pos[k * 3] = x; pos[k * 3 + 1] = y; pos[k * 3 + 2] = z;
+          if (col) {
+            // three.js 색은 0~1 이다. 약간 밝혀 어두운 실내도 형상이 보이게 한다.
+            col[k * 3] = Math.min(1, (colors[i * 3] / 255) * 1.15);
+            col[k * 3 + 1] = Math.min(1, (colors[i * 3 + 1] / 255) * 1.15);
+            col[k * 3 + 2] = Math.min(1, (colors[i * 3 + 2] / 255) * 1.15);
+          }
           maxR = Math.max(maxR, Math.hypot(x, y, z));
-        });
+          k++;
+        }
+
         const geo = new THREE.BufferGeometry();
-        geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
-        cloud = new THREE.Points(geo, new THREE.PointsMaterial({ color: 0x93c5fd, size: maxR / 220 }));
+        geo.setAttribute('position', new THREE.BufferAttribute(pos.subarray(0, k * 3), 3));
+        if (col) geo.setAttribute('color', new THREE.BufferAttribute(col.subarray(0, k * 3), 3));
+        // 점을 "면" 으로 보이게 하는 게 핵심이다.
+        //
+        // 같은 점군이라도 점을 작게 찍으면 흩뿌린 먼지로 보이고, 이웃 점과 겹칠 만큼
+        // 크게 찍으면 벽으로 보인다. 그래서 크기를 **점 밀도에서 계산**한다 —
+        // 화면을 채운 부피를 점 개수로 나눠 점 사이 평균 간격을 구하고, 그 1.7배로
+        // 그린다. 이러면 이웃끼리 조금씩 겹쳐 빈틈이 메워진다.
+        const vol = Math.max(1e-6, (2 * med) ** 3);
+        const spacing = Math.cbrt(vol / Math.max(1, k));
+        const pointSize = Math.min(maxR / 40, Math.max(maxR / 400, spacing * 1.7));
+
+        cloud = new THREE.Points(geo, new THREE.PointsMaterial({
+          ...(col ? { vertexColors: true } : { color: 0x93c5fd }),
+          size: pointSize,
+          sizeAttenuation: true,
+          // 점을 사각형이 아니라 원으로 그려 면이 매끈해 보이게 한다.
+          map: discTexture(),
+          alphaTest: 0.5,
+          transparent: false,
+        }));
         scene.add(cloud);
 
         // 촬영 동선 — 어디를 돌며 찍었는지 보이면 빠진 구간을 알 수 있다.
@@ -1355,45 +1458,6 @@ let CAPTURE_QUALITY = 0.58;
         });
       }
 
-      /**
-       * 데모 모드(?demo=1).
-       *
-       * 심사·시연 상황에서는 철거 현장 영상을 가진 사람이 거의 없다. 그렇다고 결과만
-       * 미리 만들어 보여주면 그건 시연이 아니라 그림이다. 그래서 저장소에 담긴 실제
-       * 현장 영상을 **같은 경로로** 돌린다 — 프레임 추출부터 복원까지 전부 진짜로 한다.
-       *
-       * 업로드된 사용자 영상은 저장하지 않으므로(개인정보처리방침) 데모용 영상은
-       * 저장소에 포함해 둔다.
-       */
-      const DEMO_VIDEO = '/samples/demo-site.mp4';
-
-      async function runDemo() {
-        setMode(false);                       // 파일 모드로 전환
-        $('camErr').classList.add('hidden');
-        setStage('데모 영상을 불러오는 중…', 1);
-        warmupGpu();
-        try {
-          const res = await fetch(DEMO_VIDEO);
-          if (!res.ok) throw new Error('데모 영상을 불러오지 못했습니다.');
-          const blob = await res.blob();
-          picked = new File([blob], 'demo-site.mp4', { type: 'video/mp4' });
-          $('fileName').textContent = `데모 현장 영상 · ${(picked.size / 1e6).toFixed(1)}MB`;
-          $('go').disabled = false;
-          $('go').click();
-        } catch (e) {
-          setStage('');
-          showError(e.message || '데모를 시작하지 못했습니다.');
-        }
-      }
-
-      // 데모로 들어왔으면 자동으로 시작한다 — 누를 것을 또 누르게 하지 않는다.
-      if (new URLSearchParams(location.search).get('demo') === '1') {
-        void loadRegisterFromUrl().then(runDemo);
-      }
-
-      // 직전 촬영이 남아 있으면 먼저 알린다 — 다시 찍으러 가기 전에 보여야 한다.
-      void offerSavedCapture();
-
       // 지도에서 넘어왔으면 대장을 미리 받아 둔다(복원이 끝나면 바로 쓰려고).
       void loadRegisterFromUrl();
 
@@ -1529,8 +1593,10 @@ let CAPTURE_QUALITY = 0.58;
           `줄자로 잰 값이 있으면 그걸 넣는 편이 정확합니다.`;
 
         // 잰 바닥면적을 그대로 분석 화면으로 넘긴다 — 여기서 견적으로 이어진다.
+        lastFloorAreaM2 = floor;
+        if (!$('toAnalyze').classList.contains('hidden')) $('toAnalyze').href = analyzeHref();
         const link = $('toAnalysis');
-        link.href = `/?areaM2=${floor}`;
+        link.href = analyzeHref();
         link.textContent = `이 바닥면적(${floor}㎡)으로 철거 견적 내기 →`;
         link.classList.remove('hidden');
       }
@@ -1627,7 +1693,13 @@ let CAPTURE_QUALITY = 0.58;
             `${data.registeredImages}/${data.totalImages}장 정합 · 점 ${data.pointCount.toLocaleString()}개 · ` +
             `${data.elapsedSec}초 소요` + (q.advice ? ` — ${q.advice}` : '');
 
-          renderCloud(data.points, data.cameras);
+          // 좌표·색은 base64 바이너리로 온다(같은 용량에 7배 많은 점).
+          // 구형 응답은 points 배열만 있으므로 그때는 그걸 평탄화해 쓴다.
+          const xyz = data.pointsB64
+            ? new Float32Array(b64ToBytes(data.pointsB64).buffer)
+            : Float32Array.from((data.points || []).flat());
+          const rgb = data.colorsB64 ? b64ToBytes(data.colorsB64) : null;
+          renderCloud(xyz, data.cameras, rgb);
           showMissing(data.missingSegments);
 
           // 복원 좌표계의 크기. 여기서부터는 서버를 다시 부르지 않고 화면에서 환산한다.

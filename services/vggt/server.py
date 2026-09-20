@@ -38,8 +38,13 @@ from vggt.utils.geometry import unproject_depth_map_to_point_map
 # 한 번에 넣는 최대 장수. VGGT 는 모든 프레임을 함께 보므로 메모리가 장수의 제곱으로
 # 늘어난다. L4(24GB)에서 안전한 범위로 잡고, 더 오면 고르게 솎아 쓴다.
 MAX_VIEWS = int(os.environ.get("VGGT_MAX_VIEWS", "48"))
-# 돌려줄 점 개수 상한. 조밀 깊이라 그대로 두면 수백만 개가 나와 전송이 감당하지 못한다.
-MAX_POINTS = 20000
+# 돌려줄 점 개수 상한.
+#
+# 2만 개로 두었더니 화면이 "점들의 집합" 으로만 보였다. 방처럼 보이려면 두 가지가
+# 필요하다 — 점이 충분히 조밀할 것, 그리고 **각 점이 제 색을 가질 것**.
+# 좌표를 JSON 숫자로 보내면 점당 30자가 넘어 금방 한계에 닿으므로,
+# float32/uint8 바이너리를 base64 로 실어 보낸다(점당 15바이트).
+MAX_POINTS = 150000
 # 신뢰도 하위 구간은 버린다. 하늘·유리처럼 깊이를 못 정한 화소가 형상을 망친다.
 CONF_PERCENTILE = 50.0
 
@@ -109,20 +114,34 @@ def reconstruct(img_dir: str) -> dict:
     pts = np.asarray(world).reshape(-1, 3)
     c = np.asarray(conf).reshape(-1)
 
-    # 신뢰도가 낮은 화소를 버린다. 남는 게 없으면(전부 낮으면) 거르지 않는다.
+    # 각 점의 색 = 그 점이 나온 화소의 색. 이게 없으면 형상이 맞아도 방처럼 보이지 않는다.
+    # images 는 (S, 3, H, W) 이고 0~1 범위다. 깊이와 화소가 1:1 로 대응한다.
+    rgb = (
+        images.squeeze(0).permute(0, 2, 3, 1).float().cpu().numpy().reshape(-1, 3)
+        if images.dim() == 5
+        else images.permute(0, 2, 3, 1).float().cpu().numpy().reshape(-1, 3)
+    )
+    rgb = np.clip(rgb * 255.0, 0, 255)
+
+    # 신뢰도가 낮은 화소를 버린다. 색도 같이 버려야 좌표와 어긋나지 않는다.
     if c.size == pts.shape[0] and c.size > 0:
         thr = np.percentile(c, CONF_PERCENTILE)
         keep = c >= thr
         if keep.sum() >= 100:
-            pts = pts[keep]
-    pts = pts[np.isfinite(pts).all(axis=1)]
+            pts, rgb = pts[keep], rgb[keep] if rgb.shape[0] == keep.shape[0] else rgb
+    finite = np.isfinite(pts).all(axis=1)
+    pts = pts[finite]
+    if rgb.shape[0] == finite.shape[0]:
+        rgb = rgb[finite]
     if len(pts) == 0:
         return {"ok": False, "stage": "depth", "log": "깊이를 추정하지 못했습니다."}
 
-    sample = pts
+    sample, sample_rgb = pts, rgb
     if len(pts) > MAX_POINTS:
         idx = np.linspace(0, len(pts) - 1, MAX_POINTS).astype(int)
         sample = pts[idx]
+        if rgb.shape[0] == pts.shape[0]:
+            sample_rgb = rgb[idx]
 
     # 카메라 중심 C = -R^T t
     cams = []
@@ -147,7 +166,14 @@ def reconstruct(img_dir: str) -> dict:
         "pointCount": int(len(pts)),
         "extent": robust_extent(pts),
         "cameraPathLength": path_len,
-        "points": [[round(float(v), 4) for v in p] for p in sample.tolist()],
+        # 바이너리로 싣는다. 같은 용량에 7배 많은 점을 담을 수 있다.
+        "pointsB64": base64.b64encode(sample.astype(np.float32).tobytes()).decode(),
+        "colorsB64": (
+            base64.b64encode(sample_rgb.astype(np.uint8).tobytes()).decode()
+            if sample_rgb.shape[0] == sample.shape[0] else None
+        ),
+        # 구형 클라이언트 호환용 축약본(바이너리를 못 읽을 때).
+        "points": [[round(float(v), 3) for v in p] for p in sample[:: max(1, len(sample) // 8000)].tolist()],
         "cameras": [[round(float(v), 4) for v in c2] for c2 in cams],
         "registeredNames": [os.path.basename(p) for p in used],
         "modelCount": 1,

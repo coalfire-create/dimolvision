@@ -4,6 +4,7 @@ import {
   type DetectedMaterial,
   type DemolitionStep,
   type SiteAnalysis,
+  type SiteFinding,
   type SiteQuoteBasis,
 } from '@dimol/shared';
 
@@ -270,7 +271,7 @@ const SYSTEM_PROMPT = [
 
 const USER_INSTRUCTION = [
   '이 철거 현장 사진을 분석해 아래 JSON 스키마로만 답하세요(코드블록·설명 없이 JSON 객체 하나):',
-  '{"summary": string, "materials": [{"category": "CONCRETE|STEEL|BRICK|WOOD|GLASS|GYPSUM|INSULATION|ROOFING|TILE|HAZARD|OTHER", "name": string, "estimatedKg": number, "confidence": "LOW|MEDIUM|HIGH", "recyclable": boolean, "hazardous": boolean, "note"?: string}], "demolitionSteps": [{"order": number, "title": string, "description": string, "caution"?: string}], "hazards": string[], "confidence": "LOW|MEDIUM|HIGH", "quoteBasis": {"wasteByClass": [{"wasteClass": "CONCRETE|ASPHALT|BRICK_BLOCK|WOOD|PLASTIC|METAL|GLASS|BOARD|MIXED|DESIGNATED", "estimatedKg": number, "separable": boolean, "note"?: string}], "equipment": [{"name": string, "spec"?: string, "reason": string}], "estimatedWorkDays": number, "estimatedCrewSize": number, "siteChecklist": string[], "costDrivers": string[]}}',
+  '{"summary": string, "materials": [{"category": "CONCRETE|STEEL|BRICK|WOOD|GLASS|GYPSUM|INSULATION|ROOFING|TILE|HAZARD|OTHER", "name": string, "estimatedKg": number, "confidence": "LOW|MEDIUM|HIGH", "recyclable": boolean, "hazardous": boolean, "note"?: string}], "demolitionSteps": [{"order": number, "title": string, "description": string, "caution"?: string}], "hazards": string[], "confidence": "LOW|MEDIUM|HIGH", "quoteBasis": {"wasteByClass": [{"wasteClass": "CONCRETE|ASPHALT|BRICK_BLOCK|WOOD|PLASTIC|METAL|GLASS|BOARD|MIXED|DESIGNATED", "estimatedKg": number, "separable": boolean, "note"?: string}], "equipment": [{"name": string, "spec"?: string, "reason": string}], "estimatedWorkDays": number, "estimatedCrewSize": number, "siteChecklist": string[], "costDrivers": string[]}, "findings": [{"imageIndex": number, "title": string, "observed": string, "why": string, "caution": string, "severity": "HIGH|MEDIUM|LOW", "costImpact"?: string}]}',
   '',
   '작성 지침:',
   '- summary: 어떤 건물의 어떤 상태인지, 철거 난이도를 좌우하는 요소가 무엇인지 2~3문장.',
@@ -301,6 +302,22 @@ const USER_INSTRUCTION = [
   '  (예: 내력벽 여부, 지하층·지중 구조물, 도로 접근성과 장비 진입 폭, 인접 건물 이격거리,',
   '  전기·가스·상하수 차단 여부, 석면 시료 채취 위치). 이게 견적의 오차를 만드는 지점입니다.',
   '- costDrivers: 단가를 올리거나 내리는 요인을 쓰세요(석면 별도 처리, 양중 곤란, 야간작업 등).',
+  '',
+  '[findings — 사진별 특이사항. 견적 받는 사람에게 보여 줄 자료입니다]',
+  '견적을 받는 사람은 현장에 가 본 적이 없습니다. "석면 의심 자재가 있습니다" 라는 문장만으로는',
+  '그게 어디인지 모릅니다. 그래서 **어느 사진의 무엇인지**를 묶어 줘야 합니다.',
+  '- imageIndex: 몇 번째 사진인지(0부터). 여러 장을 받았다면 반드시 정확히 지목하세요.',
+  '- title: 한 줄 제목 (예: "천장 텍스 — 석면 의심", "노출 배선 — 전기 미차단 의심").',
+  '- observed: 그 사진에서 **실제로 보이는 것**만. 추측을 사실처럼 쓰지 마세요.',
+  '- why: 왜 특이한가. 견적·공정에 어떤 영향을 주는지.',
+  '- caution: 시공 시 무엇을 조심해야 하는가. 실제 행동으로 쓰세요',
+  '  (예: "해체 전 한국환경공단 등록 석면조사기관의 조사 필요. 습식 작업·음압 격리 필수").',
+  '- severity: HIGH 는 사람이 다치거나 법을 어길 수 있는 것, MEDIUM 은 비용·공기에 크게 영향,',
+  '  LOW 는 알아두면 좋은 것.',
+  '- costImpact: 비용에 영향이 있으면 어떻게 영향을 주는지 한 줄 (예: "지정폐기물로 분류돼 처리비 645,000원/톤").',
+  '평범한 장면까지 억지로 만들지 마세요. **특이한 것만** 냅니다. 없으면 빈 배열로 두세요.',
+  '반대로 석면 의심·구조 손상·노출 배선·석면 슬레이트·지하 구조물·인접 건물 밀착처럼',
+  '견적을 바꾸는 것이 보이면 빠뜨리지 마세요.',
 ].join('\n');
 
 const WASTE_CLASSES = new Set<ConstructionWasteClass>([
@@ -311,6 +328,46 @@ const WASTE_CLASSES = new Set<ConstructionWasteClass>([
  * 견적 기초자료 정규화. 구형 응답이나 모델이 빠뜨린 경우 undefined 를 돌려
  * 화면이 해당 섹션을 통째로 감추게 한다(빈 껍데기를 보여주지 않는다).
  */
+/**
+ * 사진별 특이사항 정규화.
+ *
+ * imageIndex 는 반드시 실제 받은 사진 범위 안이어야 한다. 모델이 범위 밖 번호를 내면
+ * 화면이 엉뚱한 사진을 보여주거나 아무것도 못 찾는다 — 그런 항목은 버린다.
+ * 설명 없이 제목만 있는 것도 버린다. "무엇을 조심하라" 가 없으면 쓸모가 없다.
+ */
+export function parseFindings(raw: unknown, imageCount: number): SiteFinding[] | undefined {
+  if (!Array.isArray(raw)) return undefined;
+  const out = raw
+    .map((f) => f as Record<string, unknown>)
+    .filter((f) => typeof f === 'object' && f !== null)
+    .map((f) => {
+      const idx = typeof f.imageIndex === 'number' ? Math.trunc(f.imageIndex) : -1;
+      const sev = f.severity;
+      return {
+        imageIndex: idx,
+        title: typeof f.title === 'string' ? softenAsbestosClaims(f.title.trim()) : '',
+        observed: typeof f.observed === 'string' ? softenAsbestosClaims(f.observed.trim()) : '',
+        why: typeof f.why === 'string' ? softenAsbestosClaims(f.why.trim()) : '',
+        caution: typeof f.caution === 'string' ? softenAsbestosClaims(f.caution.trim()) : '',
+        severity: sev === 'HIGH' || sev === 'MEDIUM' || sev === 'LOW' ? sev : 'MEDIUM',
+        ...(typeof f.costImpact === 'string' && f.costImpact.trim()
+          ? { costImpact: softenAsbestosClaims(f.costImpact.trim()) }
+          : {}),
+      } as SiteFinding;
+    })
+    .filter(
+      (f) =>
+        f.imageIndex >= 0 &&
+        f.imageIndex < Math.max(1, imageCount) &&
+        f.title !== '' &&
+        f.caution !== '',
+    );
+  // 심각한 것부터 — 화면에서 위험이 먼저 보여야 한다.
+  const rank = { HIGH: 0, MEDIUM: 1, LOW: 2 };
+  out.sort((a, b) => rank[a.severity] - rank[b.severity]);
+  return out.length > 0 ? out : undefined;
+}
+
 export function parseQuoteBasis(raw: unknown): SiteQuoteBasis | undefined {
   if (typeof raw !== 'object' || raw === null) return undefined;
   const q = raw as Record<string, unknown>;
@@ -364,7 +421,11 @@ export function parseQuoteBasis(raw: unknown): SiteQuoteBasis | undefined {
 }
 
 /** 모델 텍스트 응답에서 JSON 을 추출·검증해 SiteAnalysis 로 정규화(공급자 공용). */
-export function parseVisionJson(text: string): SiteAnalysis {
+/**
+ * imageCount 는 findings 의 imageIndex 가 실제 사진 범위 안인지 검사하는 데 쓴다.
+ * 범위 밖 번호를 그대로 두면 화면이 엉뚱한 사진을 보여준다.
+ */
+export function parseVisionJson(text: string, imageCount = 1): SiteAnalysis {
   const start = text.indexOf('{');
   const end = text.lastIndexOf('}');
   if (start < 0 || end <= start) throw new Error('AI 응답 파싱 실패');
@@ -389,6 +450,7 @@ export function parseVisionJson(text: string): SiteAnalysis {
       ? raw.hazards.filter((h): h is string => typeof h === 'string').map(softenAsbestosClaims)
       : [],
     quoteBasis: parseQuoteBasis((raw as { quoteBasis?: unknown }).quoteBasis),
+    findings: parseFindings((raw as { findings?: unknown }).findings, imageCount),
     method: 'AI_VISION',
     confidence: raw.confidence === 'HIGH' || raw.confidence === 'MEDIUM' ? raw.confidence : 'LOW',
     disclaimer: SITE_ANALYSIS_DISCLAIMER,
@@ -459,7 +521,7 @@ export class GeminiSiteAnalyzer implements SiteAnalyzer {
         candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
       };
       const text = body.candidates?.[0]?.content?.parts?.map((p) => p.text ?? '').join('') ?? '';
-      return parseVisionJson(text);
+      return parseVisionJson(text, images.length);
     } finally {
       clearTimeout(timer);
     }
@@ -536,7 +598,7 @@ export class GroqSiteAnalyzer implements SiteAnalyzer {
       if (res.status === 400) res = await call(false);
       if (!res.ok) throw new VisionProviderError(`groq ${res.status}`, res.status);
       const body = (await res.json()) as { choices?: Array<{ message?: { content?: string } }> };
-      return parseVisionJson(body.choices?.[0]?.message?.content ?? '');
+      return parseVisionJson(body.choices?.[0]?.message?.content ?? '', images.length);
     } finally {
       clearTimeout(timer);
     }
@@ -607,6 +669,22 @@ const ANALYSIS_JSON_SCHEMA = {
     },
     hazards: { type: 'array', minItems: 3, maxItems: 8, items: { type: 'string' } },
     confidence: { type: 'string', enum: ['LOW', 'MEDIUM', 'HIGH'] },
+    findings: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          imageIndex: { type: 'integer' },
+          title: { type: 'string' },
+          observed: { type: 'string' },
+          why: { type: 'string' },
+          caution: { type: 'string' },
+          severity: { type: 'string', enum: ['HIGH', 'MEDIUM', 'LOW'] },
+          costImpact: { type: 'string' },
+        },
+        required: ['imageIndex', 'title', 'observed', 'why', 'caution', 'severity'],
+      },
+    },
     quoteBasis: {
       type: 'object',
       properties: {
@@ -725,7 +803,7 @@ export class SelfHostedVlmAnalyzer implements SiteAnalyzer {
       });
       if (!res.ok) throw new VisionProviderError(`vlm ${res.status}`, res.status);
       const body = (await res.json()) as { choices?: Array<{ message?: { content?: string } }> };
-      return parseVisionJson(body.choices?.[0]?.message?.content ?? '');
+      return parseVisionJson(body.choices?.[0]?.message?.content ?? '', images.length);
     } finally {
       clearTimeout(timer);
     }
@@ -779,6 +857,6 @@ export class ClaudeSiteAnalyzer implements SiteAnalyzer {
     } finally {
       clearTimeout(timer);
     }
-    return parseVisionJson(text);
+    return parseVisionJson(text, images.length);
   }
 }

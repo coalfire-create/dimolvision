@@ -993,17 +993,33 @@ let CAPTURE_QUALITY = 0.58;
             ...(mesh.vertexColorsB64 ? { vertexColors: true } : { color: 0xcbd5e1 }),
             roughness: 0.95,
             metalness: 0.0,
-            // 안쪽에서 보는 방이라 뒷면도 그려야 벽이 뚫려 보이지 않는다.
-            side: THREE.DoubleSide,
+            // **안쪽 면만** 그린다.
+            //
+            // Poisson 은 닫힌 껍질을 만든다. 양면을 다 그리면 밖에서는 가까운 벽의
+            // 바깥면이 시야를 통째로 막고, 안에서는 눈이 벽 속에 파묻힌다 —
+            // 실제로 화면이 흰 덩어리로만 찼다(실측).
+            // 바깥면을 버리면 가까운 벽이 사라지고 방 안이 그대로 들여다보인다.
+            // 인형의 집을 위에서 들여다보는 것과 같은 방식이다.
+            side: THREE.BackSide,
             flatShading: false,
           });
           cloud = new THREE.Mesh(g, mat);
           scene.add(cloud);
 
-          scene.add(new THREE.HemisphereLight(0xffffff, 0x334155, 2.2));
-          const dir = new THREE.DirectionalLight(0xffffff, 1.0);
-          dir.position.set(1, 2, 1);
-          scene.add(dir);
+          // 조명. 안쪽 면만 그리므로 대부분의 면이 고정 광원을 등지게 된다 —
+          // 방향광 하나만 두면 보고 있는 벽이 늘 어둡다(실측). 그래서
+          // ① 전체를 고르게 채우는 환경광에 ② 카메라를 따라다니는 등을 더한다.
+          // 손전등을 들고 방을 둘러보는 것과 같아, 어디를 보든 그쪽이 밝다.
+          // 점광원은 쓰지 않는다 — 거리에 따라 밝기가 떨어지는데 복원 좌표계에는
+          // 단위가 없어서, 어떤 장면은 새까맣고 어떤 장면은 하얗게 날아간다(실측).
+          // 카메라에 붙인 방향광은 거리와 무관해 어느 장면에서나 같게 보인다.
+          scene.add(new THREE.AmbientLight(0xffffff, 0.75));
+          scene.add(new THREE.HemisphereLight(0xffffff, 0x475569, 0.6));
+          const head = new THREE.DirectionalLight(0xffffff, 1.4);
+          head.position.set(0, 0.3, 1);
+          camera.add(head);
+          camera.add(head.target);
+          scene.add(camera);
           return true;
         } catch {
           return false;
@@ -1118,6 +1134,11 @@ let CAPTURE_QUALITY = 0.58;
         const cut = Math.max(med * 4, sorted[Math.floor(n * 0.97)] || med * 4);
 
         let k = 0, maxR = 0;
+        // 화면 잡는 데 쓸 반지름은 따로 모은다.
+        // maxR 은 가장 멀리 튄 점까지의 거리라, 잘라내고 남은 이상치 몇 개만으로도
+        // 몇 배가 된다. 그걸 기준으로 카메라를 놓으면 방이 화면 가운데 콩알만 해진다
+        // (실측). 90% 지점 거리를 쓰면 실제로 방이 있는 만큼만 잡는다.
+        const keptDist = new Float32Array(n);
         const col = colors ? new Float32Array(points.length) : null;
         for (let i = 0; i < n; i++) {
           if (dists[i] > cut) continue;
@@ -1131,9 +1152,18 @@ let CAPTURE_QUALITY = 0.58;
             col[k * 3 + 1] = Math.min(1, Math.pow(colors[i * 3 + 1] / 255, 0.65) * 1.1);
             col[k * 3 + 2] = Math.min(1, Math.pow(colors[i * 3 + 2] / 255, 0.65) * 1.1);
           }
-          maxR = Math.max(maxR, Math.hypot(x, y, z));
+          const r = Math.hypot(x, y, z);
+          keptDist[k] = r;
+          maxR = Math.max(maxR, r);
           k++;
         }
+
+        // 방이 실제로 차지하는 반지름. 카메라 거리·시선 도달거리는 전부 이걸 쓴다.
+        const viewR = (() => {
+          if (k === 0) return maxR || 1;
+          const d = Float32Array.from(keptDist.subarray(0, k)).sort();
+          return d[Math.floor(k * 0.9)] || maxR || 1;
+        })();
 
         const geo = new THREE.BufferGeometry();
         geo.setAttribute('position', new THREE.BufferAttribute(pos.subarray(0, k * 3), 3));
@@ -1243,21 +1273,28 @@ let CAPTURE_QUALITY = 0.58;
         //   0   = 사람이 서 있던 바로 그 자리 (실내 시점의 기본값)
         //   0.8 이상 = 방 밖으로 나가 전체를 내려다보는 시점
         // 휠이 이 값을 움직여 실내 ↔ 전체가 끊김 없이 이어진다.
-        let back = inside ? 0 : 1.5;
+        // 메시가 있으면 밖에서 시작한다. 닫힌 껍질 안에 눈을 두면 사방이 벽이라
+        // 아무것도 안 보인다. 바깥면을 버렸으므로 밖에서도 방 안이 들여다보인다.
+        //
+        // 얼마나 물러날지는 눈대중으로 정하지 않는다. 반지름 viewR 인 구가 시야각
+        // 안에 들어오려면 viewR / sin(시야각/2) 만큼 떨어져야 한다. 1.0 배로 뒀더니
+        // 어떤 장면은 벽에 코를 박았다(실측). 여유 15% 를 더해 쓴다.
+        const FIT = 1.15 / Math.sin((camera.fov * Math.PI) / 360);
+        let back = inside && !built ? 0 : FIT;
         const apply = () => {
           const dx = Math.cos(rx) * Math.sin(ry), dy = Math.sin(rx), dz = Math.cos(rx) * Math.cos(ry);
-          const t = maxR * back;
+          const t = viewR * back;
           camera.position.set(pivot[0] + dx * t, pivot[1] + dy * t, pivot[2] + dz * t);
           // 안에서는 바깥(벽)을 본다 — 중심을 보면 자기 뒤통수를 보는 셈이다.
           // 충분히 물러나면 방 전체가 앞에 놓이므로 그때는 중심을 본다.
           if (inside && back < 0.8) {
-            camera.lookAt(pivot[0] - dx * maxR, pivot[1] - dy * maxR, pivot[2] - dz * maxR);
+            camera.lookAt(pivot[0] - dx * viewR, pivot[1] - dy * viewR, pivot[2] - dz * viewR);
           } else {
             camera.lookAt(pivot[0], pivot[1], pivot[2]);
           }
           // 동선 선은 방 안에서 보면 코앞을 가로지르는 주황색 낙서가 된다.
           // 어디를 빠뜨렸는지 보려고 그리는 것이니, 밖에서 전체를 볼 때만 보인다.
-          if (pathLine) pathLine.visible = back >= 0.8;
+          if (pathLine) pathLine.visible = back >= FIT * 1.3;
         };
         apply();
 
@@ -1265,7 +1302,7 @@ let CAPTURE_QUALITY = 0.58;
         // 안에서 시작하더라도 끝까지 빼면 전체를 밖에서 볼 수 있어야 하고,
         // -0.4 까지는 들어갈 수 있어야 한다(보고 있는 벽 쪽으로 한 걸음 더).
         const zoom = (delta) => {
-          back = Math.max(-0.4, Math.min(6, back + delta));
+          back = Math.max(-0.4, Math.min(FIT * 4, back + delta));
           apply();
         };
 
@@ -1314,7 +1351,7 @@ let CAPTURE_QUALITY = 0.58;
             // 나누면 안 된다 — back 이 음수(벽 쪽으로 들어간 상태)일 때 부호가 뒤집혀
             // 벌렸는데 오히려 멀어진다(실측). 로그를 빼면 부호와 무관하게 대칭이다.
             const ratio = Math.max(0.05, pinchDist() / Math.max(1, pinchStart));
-            back = Math.max(-0.4, Math.min(6, pinchBack - Math.log(ratio) * 1.5));
+            back = Math.max(-0.4, Math.min(FIT * 4, pinchBack - Math.log(ratio) * 1.5));
             apply();
             return;
           }

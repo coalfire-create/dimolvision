@@ -659,7 +659,7 @@ export function SiteAnalysisScreen() {
             <Text style={styles.videoTitle}>2. 영상으로 촬영하기</Text>
             <Text style={styles.videoSub}>
               {parcel
-                ? '벽을 따라 걸으며 한 번 찍으면 소재 분석·견적에 더해 3D 복원과 면적·부피까지 나옵니다. 크기 기준은 대장 층고로 자동 설정됩니다.'
+                ? '천천히 걸으며 한 번 찍으면 3D 복원·면적·부피와 소재 분석·견적이 함께 나옵니다. 철거 현장이 아니어도 됩니다 — 지금 계신 사무실이나 집을 찍어 보세요.'
                 : '먼저 위에서 현장 주소를 지정하세요. 지정하면 촬영이 열립니다.'}
             </Text>
             <View style={styles.videoCta}>

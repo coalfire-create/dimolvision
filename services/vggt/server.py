@@ -91,73 +91,106 @@ def robust_extent(pts: np.ndarray) -> dict:
 
 MESH_ERROR: str | None = None
 
+# 메시 생성을 켤지. 기본은 켜지만, 별도 프로세스에서 돌려 죽어도 서비스는 살아남는다.
+MESH_ENABLED = os.environ.get("VGGT_MESH", "1") == "1"
+# Poisson 은 오래 걸릴 수 있다. 이 시간을 넘기면 포기하고 점군만 돌려준다.
+MESH_TIMEOUT_SEC = int(os.environ.get("VGGT_MESH_TIMEOUT", "120"))
+
+# 자식 프로세스가 실행할 코드. open3d 를 **여기서만** import 한다 —
+# 부모(torch 가 올라간 프로세스)에서 함께 import 하면 네이티브 라이브러리가 충돌해
+# SIGSEGV 로 컨테이너가 통째로 죽는다(실측). 프로세스를 나누면 죽어도 여기서 끝난다.
+_MESH_CHILD = r"""
+import sys, json, base64
+import numpy as np
+import open3d as o3d
+
+d = np.load(sys.argv[1])
+pts, rgb = d["pts"], d["rgb"]
+pc = o3d.geometry.PointCloud()
+pc.points = o3d.utility.Vector3dVector(pts.astype(np.float64))
+if rgb.size:
+    pc.colors = o3d.utility.Vector3dVector((rgb / 255.0).astype(np.float64))
+pc, _ = pc.remove_statistical_outlier(nb_neighbors=20, std_ratio=2.0)
+pc.estimate_normals(o3d.geometry.KDTreeSearchParamKNN(knn=30))
+pc.orient_normals_towards_camera_location(pc.get_center())
+pc.normals = o3d.utility.Vector3dVector(-np.asarray(pc.normals))
+mesh, dens = o3d.geometry.TriangleMesh.create_from_point_cloud_poisson(pc, depth=9, linear_fit=True)
+dn = np.asarray(dens)
+if dn.size:
+    mesh.remove_vertices_by_mask(dn < np.quantile(dn, 0.06))
+mesh.remove_degenerate_triangles()
+mesh.remove_duplicated_vertices()
+mesh = mesh.simplify_quadric_decimation(150000)
+v = np.asarray(mesh.vertices, dtype=np.float32)
+f = np.asarray(mesh.triangles, dtype=np.uint32)
+vc = np.asarray(mesh.vertex_colors)
+if len(v) < 100 or len(f) < 100:
+    print(json.dumps({"ok": False, "log": "면이 너무 적습니다"})); sys.exit(0)
+print(json.dumps({
+    "ok": True,
+    "verticesB64": base64.b64encode(v.tobytes()).decode(),
+    "facesB64": base64.b64encode(f.tobytes()).decode(),
+    "vertexColorsB64": (base64.b64encode((vc * 255).astype(np.uint8).tobytes()).decode()
+                        if vc.size else None),
+    "vertexCount": int(len(v)),
+    "faceCount": int(len(f)),
+}))
+"""
+
 
 def build_mesh(pts: np.ndarray, rgb: np.ndarray) -> dict | None:
     """
-    점군 → 삼각형 면(메시).
+    점군 → 삼각형 면(메시). **자식 프로세스**에서 만든다.
 
-    점을 크게 찍어 겹치게 하면 멀리서는 벽처럼 보이지만 가까이 가면 다시 점이다.
-    진짜 면을 만들려면 법선을 추정하고 표면을 맞춰야 한다. Poisson 재구성은
-    닫힌 매끄러운 표면을 만들어 주는데, 밀도가 낮은 곳까지 억지로 메우므로
-    그런 부분은 잘라낸다 — 안 그러면 없는 벽이 생긴다.
+    점을 크게 찍어 겹치게 하면 멀리서만 벽처럼 보이고 가까이 가면 다시 점이다.
+    진짜 면을 만들려면 법선을 추정하고 표면을 맞춰야 한다.
+
+    왜 프로세스를 나누는가: open3d 와 torch 를 한 프로세스에 올리면 네이티브
+    라이브러리가 충돌해 SIGSEGV 로 컨테이너가 통째로 죽는다(실측: signal 11).
+    메시는 덤인데 그것 때문에 복원 전체를 잃을 수는 없다.
     """
     global MESH_ERROR
     MESH_ERROR = None
-    try:
-        import open3d as o3d
-    except Exception as e:  # noqa: BLE001
-        MESH_ERROR = f"open3d import 실패: {e}"
+    if not MESH_ENABLED or len(pts) < 5000:
         return None
-    if len(pts) < 5000:
-        return None
+    import subprocess
+
+    tmp = tempfile.mkdtemp(prefix="mesh-")
     try:
         idx = (np.linspace(0, len(pts) - 1, MESH_SAMPLE).astype(int)
                if len(pts) > MESH_SAMPLE else np.arange(len(pts)))
-        pc = o3d.geometry.PointCloud()
-        pc.points = o3d.utility.Vector3dVector(pts[idx].astype(np.float64))
-        if rgb is not None and rgb.shape[0] == pts.shape[0]:
-            pc.colors = o3d.utility.Vector3dVector((rgb[idx] / 255.0).astype(np.float64))
-
-        # 이상치를 먼저 뺀다. 튄 점이 남으면 표면이 그쪽으로 끌려간다.
-        pc, _ = pc.remove_statistical_outlier(nb_neighbors=20, std_ratio=2.0)
-        pc.estimate_normals(o3d.geometry.KDTreeSearchParamKNN(knn=30))
-        # orient_normals_consistent_tangent_plane 은 12만 점에서 수 분이 걸린다.
-        # 카메라 쪽을 향하게 뒤집는 것으로 충분하다 — 실내를 안에서 찍었으므로
-        # 원점(촬영 동선 중심) 방향이 곧 보이는 면이다.
-        pc.orient_normals_towards_camera_location(pc.get_center())
-        pc.normals = o3d.utility.Vector3dVector(-np.asarray(pc.normals))
-
-        mesh, dens = o3d.geometry.TriangleMesh.create_from_point_cloud_poisson(
-            pc, depth=9, linear_fit=True
+        npz = os.path.join(tmp, "in.npz")
+        np.savez_compressed(
+            npz,
+            pts=pts[idx].astype(np.float32),
+            rgb=(rgb[idx].astype(np.float32) if rgb is not None and rgb.shape[0] == pts.shape[0]
+                 else np.zeros((0, 3), dtype=np.float32)),
         )
-        # 점이 거의 없던 곳에 생긴 면은 지운다(하위 6%).
-        d = np.asarray(dens)
-        if d.size:
-            mesh.remove_vertices_by_mask(d < np.quantile(d, 0.06))
-        mesh.remove_degenerate_triangles()
-        mesh.remove_duplicated_vertices()
-        mesh = mesh.simplify_quadric_decimation(150000)
-        mesh.compute_vertex_normals()
+        script = os.path.join(tmp, "child.py")
+        with open(script, "w") as f:
+            f.write(_MESH_CHILD)
 
-        v = np.asarray(mesh.vertices, dtype=np.float32)
-        f = np.asarray(mesh.triangles, dtype=np.uint32)
-        if len(v) < 100 or len(f) < 100:
+        r = subprocess.run(
+            ["python", script, npz],
+            capture_output=True, text=True, timeout=MESH_TIMEOUT_SEC,
+        )
+        if r.returncode != 0:
+            MESH_ERROR = f"자식 프로세스 종료코드 {r.returncode}: {r.stderr[-300:]}"
             return None
-        vc = np.asarray(mesh.vertex_colors)
-        return {
-            "verticesB64": base64.b64encode(v.tobytes()).decode(),
-            "facesB64": base64.b64encode(f.tobytes()).decode(),
-            "vertexColorsB64": (
-                base64.b64encode((vc * 255).astype(np.uint8).tobytes()).decode()
-                if vc.size else None
-            ),
-            "vertexCount": int(len(v)),
-            "faceCount": int(len(f)),
-        }
+        out = json.loads(r.stdout.strip().splitlines()[-1])
+        if not out.get("ok"):
+            MESH_ERROR = out.get("log")
+            return None
+        out.pop("ok", None)
+        return out
+    except subprocess.TimeoutExpired:
+        MESH_ERROR = f"{MESH_TIMEOUT_SEC}초 안에 끝나지 않았습니다"
+        return None
     except Exception as e:  # noqa: BLE001
-        # 메시는 덤이다. 실패해도 점군은 그대로 보여 준다. 다만 이유는 남긴다.
         MESH_ERROR = f"{type(e).__name__}: {e}"
         return None
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
 
 
 def reconstruct(img_dir: str) -> dict:

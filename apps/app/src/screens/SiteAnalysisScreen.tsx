@@ -16,8 +16,10 @@ import {
   BUILDING_STRUCTURE_LABELS,
   MATERIAL_CATEGORY_LABELS,
   WASTE_CLASS_LABELS,
+  MAX_ROOM_AREA_M2,
   m2ToPyeong,
   pyeongToM2,
+  roomAreaM2,
   sumRoomAreaM2,
   type BuildingStructure,
   formatWonShort,
@@ -226,12 +228,12 @@ function readAreaFromUrl(): number | undefined {
 const MAX_ROOM_SIDE_M = 100;
 
 /**
- * 3D 복원(/recon.html)이 방 단위로 잰 가로·세로를 쿼리로 넘겨준다.
+ * 3D 복원(/recon.html)이 방 단위로 잰 가로·세로와 평면도 윤곽 면적을 쿼리로 넘겨준다.
  * "영상으로 측정" 버튼으로 나갔다가 돌아왔을 때, 어느 방(room 인덱스)을 얼마로
  * 채워야 하는지 여기서 읽는다. 값이 이상하면(0 이하·상한 초과·인덱스 없음) 무시한다.
  */
 function readRoomMeasurementFromUrl():
-  { index: number; name: string; lengthM: number; widthM: number } | undefined {
+  { index: number; name: string; lengthM: number; widthM: number; areaM2?: number } | undefined {
   if (Platform.OS !== 'web' || typeof window === 'undefined') return undefined;
   const q = new URLSearchParams(window.location.search);
   const index = Number(q.get('room'));
@@ -240,7 +242,28 @@ function readRoomMeasurementFromUrl():
   if (!Number.isInteger(index) || index < 0) return undefined;
   if (!Number.isFinite(lengthM) || lengthM <= 0 || lengthM > MAX_ROOM_SIDE_M) return undefined;
   if (!Number.isFinite(widthM) || widthM <= 0 || widthM > MAX_ROOM_SIDE_M) return undefined;
-  return { index, name: (q.get('roomName') ?? '').trim(), lengthM, widthM };
+  // 평면도 윤곽 면적(선택). 있으면 견적은 가로×세로 대신 이 값을 쓴다 — 꺾인 공간에서
+  // 가로×세로는 빈 구역까지 곱해 과대해진다.
+  const areaM2 = Number(q.get('roomAreaM2'));
+  return {
+    index,
+    name: (q.get('roomName') ?? '').trim(),
+    lengthM,
+    widthM,
+    ...(Number.isFinite(areaM2) && areaM2 > 0 && areaM2 <= MAX_ROOM_AREA_M2 ? { areaM2 } : {}),
+  };
+}
+
+/**
+ * 방 입력 한 줄. 치수는 사용자가 고쳐 쓰는 값이라 문자열로 들고 있고,
+ * areaM2 는 3D 복원 평면도가 낸 값이라 숫자로 둔다(손으로 넣는 칸이 아니다).
+ */
+interface RoomRow {
+  name: string;
+  length: string;
+  width: string;
+  /** 평면도 윤곽 면적(㎡). 가로·세로를 손으로 고치면 근거가 어긋나므로 그때 버린다. */
+  areaM2?: number;
 }
 
 function mimeFromUri(uri: string): string {
@@ -267,9 +290,7 @@ export function SiteAnalysisScreen() {
    * 위 연면적 입력도 대상 범위와 다르다 — 줄자로 잰 방 목록이 있으면 그게 우선이다.
    */
   const [roomsMode, setRoomsMode] = useState(false);
-  const [rooms, setRooms] = useState<Array<{ name: string; length: string; width: string }>>([
-    { name: '', length: '', width: '' },
-  ]);
+  const [rooms, setRooms] = useState<RoomRow[]>([{ name: '', length: '', width: '' }]);
   /** 건축년도(사용승인). 2009년 석면 사용 금지 이전이면 AI 가 석면 의심을 가중한다. */
   const [buildYear, setBuildYear] = useState('');
   const [estimate, setEstimate] = useState<VolumeEstimate | null>(null);
@@ -301,6 +322,7 @@ export function SiteAnalysisScreen() {
           name: row.name || roomMeasurement.name,
           length: String(roomMeasurement.lengthM),
           width: String(roomMeasurement.widthM),
+          ...(roomMeasurement.areaM2 !== undefined ? { areaM2: roomMeasurement.areaM2 } : {}),
         };
         return next;
       });
@@ -362,18 +384,16 @@ export function SiteAnalysisScreen() {
     return Number.isFinite(v) && v > 0 ? pyeongToM2(v) : undefined;
   }
 
-  /** 입력 행 중 이름·길이·폭이 모두 채워진 방만 실측값으로 인정한다. */
+  /** 입력 행 중 면적을 낼 수 있는 방만 실측값으로 인정한다(평면도 면적 또는 가로×세로). */
   function roomMeasurements(): RoomMeasurement[] {
     return rooms
       .map((r) => ({
         name: r.name.trim() || '공간',
         lengthM: Number(r.length),
         widthM: Number(r.width),
+        ...(r.areaM2 !== undefined ? { areaM2: r.areaM2 } : {}),
       }))
-      .filter(
-        (r) =>
-          Number.isFinite(r.lengthM) && r.lengthM > 0 && Number.isFinite(r.widthM) && r.widthM > 0,
-      );
+      .filter((r) => roomAreaM2(r) !== undefined);
   }
 
   function addRoomRow() {
@@ -384,11 +404,16 @@ export function SiteAnalysisScreen() {
     setRooms((prev) => (prev.length <= 1 ? prev : prev.filter((_, i) => i !== index)));
   }
 
-  function updateRoomRow(
-    index: number,
-    patch: Partial<{ name: string; length: string; width: string }>,
-  ) {
-    setRooms((prev) => prev.map((r, i) => (i === index ? { ...r, ...patch } : r)));
+  function updateRoomRow(index: number, patch: Partial<RoomRow>) {
+    setRooms((prev) =>
+      prev.map((r, i) => {
+        if (i !== index) return r;
+        const next = { ...r, ...patch };
+        // 가로·세로를 손으로 고치면 평면도 면적은 더 이상 그 방을 설명하지 않는다 — 버린다.
+        if (patch.length !== undefined || patch.width !== undefined) delete next.areaM2;
+        return next;
+      }),
+    );
   }
 
   /**
@@ -841,6 +866,11 @@ export function SiteAnalysisScreen() {
                           <Text style={styles.roomVideoText}>영상 측정</Text>
                         </PressableScale>
                       </View>
+                      {r.areaM2 !== undefined ? (
+                        <Text style={styles.roomPlanNote}>
+                          평면도 윤곽 {r.areaM2}㎡ 적용 — 가로·세로를 고치면 이 값은 해제됩니다
+                        </Text>
+                      ) : null}
                     </View>
                   ))}
                   <PressableScale
@@ -1944,6 +1974,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.primarySoft,
   },
   roomVideoText: { color: colors.primary, fontSize: 12, fontWeight: '700' },
+  roomPlanNote: { color: colors.primary, fontSize: 11, fontWeight: '600', marginTop: 5 },
   roomAddBtn: { alignSelf: 'flex-start', marginTop: 2 },
   roomAddText: { color: colors.primary, fontSize: 12.5, fontWeight: '700' },
   roomTotal: { color: colors.text, fontSize: 13, fontWeight: '700', marginTop: spacing.xs },

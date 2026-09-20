@@ -84,6 +84,14 @@
       .blk button.ghost { background: none; color: var(--muted); border: 1px solid var(--border);
                           font-weight: 600; font-size: 13px; padding: 10px; }
 
+      .viewerFail { display: flex; align-items: center; justify-content: center; height: 100%;
+                    margin: 0; padding: 20px; text-align: center; color: #cbd5e1; font-size: 13px; line-height: 1.6; }
+      /* 평면도 — 칸 1개 = 캔버스 1픽셀로 그리고 CSS 로 확대한다(pixelated 로 선이 뭉개지지 않는다) */
+      #plan canvas { width: 100%; height: auto; display: block; background: #fff;
+                     border: 1px solid var(--border); border-radius: 10px; image-rendering: pixelated; }
+      .planLegend { display: flex; gap: 14px; flex-wrap: wrap; margin-top: 10px; font-size: 12px; color: var(--muted); }
+      .planLegend i { display: inline-block; width: 11px; height: 11px; border-radius: 3px;
+                      margin-right: 5px; vertical-align: -1px; }
       .presets { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 8px; margin: 12px 0; }
       .preset { display: block; width: 100%; text-align: left; background: #fff; border: 1.5px solid var(--border);
                 border-radius: 10px; padding: 10px 12px; cursor: pointer; font: inherit; color: inherit; margin: 0; }
@@ -167,6 +175,21 @@
         <p class="sub" id="quality"></p>
         <div id="viewer"></div>
         <div class="stats" id="stats"></div>
+      </div>
+
+      <div id="planCard" class="card hidden">
+        <h2>평면도 (윤곽)</h2>
+        <p class="sub">
+          점군을 위에서 내려다보게 눌러 만든 도면입니다. 벽이 선으로 남고, 그 안쪽이 공간입니다.
+          <b>가로×세로로 계산한 면적은 L자·ㄷ자 공간에서 빈 구역까지 삼켜 과대</b>해지는데,
+          이 윤곽으로 재면 그 오차가 없습니다.
+        </p>
+        <div id="plan"></div>
+        <div class="planLegend">
+          <span><i style="background: #1e3a8a"></i>벽·물체가 잡힌 자리</span>
+          <span><i style="background: #dbeafe"></i>공간 내부(면적 산정 구역)</span>
+        </div>
+        <div id="planNote" class="note hidden"></div>
       </div>
 
       <div id="scaleCard" class="card hidden">
@@ -686,6 +709,36 @@ const SAMPLE = 72, KEEP = 60, MAX_EDGE = 1600;
         $('error').classList.remove('hidden');
       }
 
+      // ── 평면도 ───────────────────────────────────────────────────────
+      // 서버가 점군을 바닥면에 투영해 만든 격자를 준다(칸 = 벽/내부 판정).
+      // 칸 하나를 캔버스 1픽셀로 찍고 CSS 로 확대한다 — 칸이 수천 개라도 DOM 을 늘리지 않는다.
+      let lastPlan = null;
+
+      function renderPlan(plan) {
+        const cv = document.createElement('canvas');
+        cv.width = plan.cols;
+        cv.height = plan.rows;
+        const ctx = cv.getContext('2d');
+        ctx.fillStyle = '#dbeafe';
+        for (const i of plan.footprintCells) ctx.fillRect(i % plan.cols, (i / plan.cols) | 0, 1, 1);
+        ctx.fillStyle = '#1e3a8a';
+        for (const i of plan.wallCells) ctx.fillRect(i % plan.cols, (i / plan.cols) | 0, 1, 1);
+        const host = $('plan');
+        host.innerHTML = '';
+        host.appendChild(cv);
+      }
+
+      /** 평면도 면적·둘레를 미터로. 기준 배율(k)이 없으면 낼 수 없다. */
+      function planMeters(plan, k) {
+        const cell = plan.cellSize * k;
+        const r1 = (n) => Math.round(n * 10) / 10;
+        return {
+          areaM2: r1(plan.footprintCells.length * cell * cell),
+          perimeterM: r1(plan.perimeterEdges * cell),
+          cellM: Math.round(cell * 100) / 100,
+        };
+      }
+
       // ── 크기 환산 ────────────────────────────────────────────────────
       // 복원 좌표계는 단위가 없다. 기준 길이 하나를 곱해 전체를 미터로 옮긴다.
       // 서버를 다시 부르지 않으므로 기준을 바꾸면 즉시 반영된다 — 여러 기준을
@@ -739,6 +792,12 @@ const SAMPLE = 72, KEEP = 60, MAX_EDGE = 1600;
             ['소요', lastStats.sec + '초'],
           ].map(([k, v]) => `<div class="stat"><span>${k}</span><b>${v}</b></div>`).join('');
           note.innerHTML = '위에서 아는 길이를 하나 고르면 전체 치수가 미터로 나옵니다.';
+          if (lastPlan) {
+            // 도면 형상은 기준 없이도 보여 줄 수 있다. 다만 미터는 붙이지 않는다.
+            $('planNote').classList.remove('hidden');
+            $('planNote').innerHTML =
+              '형상은 나왔습니다. 아래에서 아는 길이를 하나 고르면 이 윤곽의 <b>바닥면적과 벽 둘레</b>가 미터로 나옵니다.';
+          }
           $('toAnalysis').classList.add('hidden');
           return;
         }
@@ -749,10 +808,30 @@ const SAMPLE = 72, KEEP = 60, MAX_EDGE = 1600;
         const [w, d, h] = dims;
         const floor = r1(w * d), vol = r1(w * d * h);
 
+        // 평면도가 있으면 그 윤곽 면적이 견적에 쓸 값이다(가로×세로는 상한으로 함께 보여 준다).
+        const plan = lastPlan ? planMeters(lastPlan, k) : null;
+        const area = plan ? plan.areaM2 : floor;
+
         $('stats').innerHTML = [
           ['가로', r1(w) + 'm'], ['세로', r1(d) + 'm'], ['높이', r1(h) + 'm'],
-          ['바닥면적', floor + '㎡'], ['부피', vol + '㎥'],
+          ...(plan
+            ? [['바닥면적(윤곽)', plan.areaM2 + '㎡'], ['벽 둘레', plan.perimeterM + 'm'],
+               ['바운딩 기준', floor + '㎡']]
+            : [['바닥면적', floor + '㎡']]),
+          ['부피', vol + '㎥'],
         ].map(([kk, v]) => `<div class="stat"><span>${kk}</span><b>${v}</b></div>`).join('');
+
+        if (plan) {
+          const gap = floor > 0 ? Math.round((1 - plan.areaM2 / floor) * 100) : 0;
+          $('planNote').classList.remove('hidden');
+          $('planNote').innerHTML =
+            `윤곽으로 잰 바닥면적 <b>${plan.areaM2}㎡</b> · 벽 둘레 <b>${plan.perimeterM}m</b> ` +
+            `(도면 해상도 ${plan.cellM}m — 이보다 작은 요철은 표현되지 않습니다).` +
+            (gap >= 5
+              ? ` 가로×세로로 재면 ${floor}㎡ 라 <b>${gap}% 과대</b>합니다 — 직사각형이 아닌 공간입니다. ` +
+                '견적에는 윤곽 면적을 씁니다.'
+              : ' 가로×세로로 잰 값과 거의 같습니다 — 직사각형에 가까운 공간입니다.');
+        }
 
         note.innerHTML =
           `${$('axis').selectedOptions[0].text} = ${meters}m 기준으로 환산했습니다 ` +
@@ -762,15 +841,18 @@ const SAMPLE = 72, KEEP = 60, MAX_EDGE = 1600;
         // 잰 치수를 그대로 분석 화면으로 넘긴다 — 여기서 견적으로 이어진다.
         const link = $('toAnalysis');
         if (roomIndex !== null) {
-          // 방 실측: 바닥면적 하나가 아니라 가로·세로 두 값이 그 방 칸에 그대로 들어간다.
+          // 방 실측: 가로·세로와 함께 평면도 면적도 넘긴다. 면적이 있으면 견적은 그것을 쓰고,
+          // 가로·세로는 사용자가 눈으로 확인하는 값으로 남는다.
           const q = new URLSearchParams({ room: roomIndex, roomLengthM: r1(w), roomWidthM: r1(d) });
+          if (plan) q.set('roomAreaM2', plan.areaM2);
           if (roomName) q.set('roomName', roomName);
           link.href = `/?${q.toString()}`;
           link.textContent =
-            `이 치수(${r1(w)}m × ${r1(d)}m)로 ${roomName ? roomName + ' ' : ''}방 채우기 →`;
+            `이 치수(${r1(w)}m × ${r1(d)}m${plan ? ` · 윤곽 ${plan.areaM2}㎡` : ''})로 ` +
+            `${roomName ? roomName + ' ' : ''}방 채우기 →`;
         } else {
-          link.href = `/?areaM2=${floor}`;
-          link.textContent = `이 바닥면적(${floor}㎡)으로 철거 견적 내기 →`;
+          link.href = `/?areaM2=${area}`;
+          link.textContent = `이 바닥면적(${area}㎡)으로 철거 견적 내기 →`;
         }
         link.classList.remove('hidden');
       }
@@ -839,11 +921,30 @@ const SAMPLE = 72, KEEP = 60, MAX_EDGE = 1600;
             `${data.registeredImages}/${data.totalImages}장 정합 · 점 ${data.pointCount.toLocaleString()}개 · ` +
             `${data.elapsedSec}초 소요` + (q.advice ? ` — ${q.advice}` : '');
 
-          renderCloud(data.points, data.cameras);
+          // 점군 뷰어는 외부 스크립트(three.js)와 WebGL 에 의존한다. CDN 이 막히거나 그래픽이
+          // 없으면 여기서 던지는데, 그렇다고 측정값까지 버릴 이유가 없다 — 이 페이지의 결과물은
+          // 뷰어가 아니라 **면적·둘레**다. 뷰어만 비우고 도면과 치수는 그대로 낸다.
+          try {
+            renderCloud(data.points, data.cameras);
+          } catch {
+            $('viewer').innerHTML =
+              '<p class="viewerFail">3D 뷰어를 표시할 수 없습니다(그래픽 미지원 또는 스크립트 차단).<br>' +
+              '아래 평면도와 치수는 정상으로 계산됩니다.</p>';
+          }
 
           // 복원 좌표계의 크기. 여기서부터는 서버를 다시 부르지 않고 화면에서 환산한다.
           lastExtent = data.extent;
           lastStats = { reg: data.registeredImages, pts: data.pointCount, sec: data.elapsedSec };
+
+          // 평면도는 점이 너무 적거나 형상이 잡히지 않으면 서버가 내지 않는다 — 없으면 숨긴다.
+          lastPlan = data.floorPlan || null;
+          if (lastPlan) {
+            renderPlan(lastPlan);
+            $('planCard').classList.remove('hidden');
+          } else {
+            $('planCard').classList.add('hidden');
+          }
+
           $('scaleCard').classList.remove('hidden');
           renderScaled();
         } catch (e) {

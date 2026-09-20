@@ -70,22 +70,40 @@ export interface RoomMeasurement {
   lengthM: number;
   /** 실측 폭(m). */
   widthM: number;
+  /**
+   * 평면도 윤곽으로 직접 구한 면적(㎡). 있으면 가로×세로 대신 이 값을 쓴다.
+   *
+   * 왜 따로 받는가: 가로×세로는 공간이 직사각형일 때만 맞다. L자·ㄷ자 공간에서는 빈 구역까지
+   * 곱해 들어가 면적이 20~33% 부풀고, 그만큼 물량과 금액이 통째로 과대해진다. 3D 복원이
+   * 만든 평면도는 형상을 그대로 잰 값이라 그 오차가 없다.
+   */
+  areaM2?: number;
 }
 
 /**
  * 방 목록의 실측 면적 합(㎡, 소수 1자리).
- * 길이·폭이 양수가 아니거나 한 방이 {@link MAX_ROOM_AREA_M2}를 넘으면 그 방은 건너뛴다 —
+ *
+ * 방마다 평면도 면적(areaM2)이 있으면 그것을, 없으면 가로×세로를 쓴다.
+ * 값이 양수가 아니거나 한 방이 {@link MAX_ROOM_AREA_M2}를 넘으면 그 방은 건너뛴다 —
  * 오타 한 줄이 전체 견적을 부풀리는 것보다, 그 방만 빠지고 나머지가 맞는 편이 낫다.
  */
 export function sumRoomAreaM2(rooms: readonly RoomMeasurement[]): number {
   const total = rooms.reduce((sum, r) => {
-    if (!Number.isFinite(r.lengthM) || r.lengthM <= 0) return sum;
-    if (!Number.isFinite(r.widthM) || r.widthM <= 0) return sum;
-    const area = r.lengthM * r.widthM;
-    if (area > MAX_ROOM_AREA_M2) return sum;
+    const area = roomAreaM2(r);
+    if (area === undefined || area > MAX_ROOM_AREA_M2) return sum;
     return sum + area;
   }, 0);
   return Math.round(total * 10) / 10;
+}
+
+/** 방 하나의 면적(㎡). 평면도 면적이 우선이고, 없으면 가로×세로. 쓸 수 없으면 undefined. */
+export function roomAreaM2(room: RoomMeasurement): number | undefined {
+  if (room.areaM2 !== undefined) {
+    return Number.isFinite(room.areaM2) && room.areaM2 > 0 ? room.areaM2 : undefined;
+  }
+  if (!Number.isFinite(room.lengthM) || room.lengthM <= 0) return undefined;
+  if (!Number.isFinite(room.widthM) || room.widthM <= 0) return undefined;
+  return room.lengthM * room.widthM;
 }
 
 /** 운반 차량 정격 적재량(톤) — 대수 환산 안내용. */

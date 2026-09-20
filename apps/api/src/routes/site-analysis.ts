@@ -2,6 +2,7 @@ import { Router } from 'express';
 import {
   estimateDemolitionCost,
   reconcileWasteByClass,
+  roomAreaM2,
   siteAnalysisToWasteItems,
   sumRoomAreaM2,
   type CostEstimate,
@@ -19,8 +20,10 @@ import type { VolumeEstimator } from '../estimation/provider.js';
 import type { BuildingRegisterClient } from '../public-data/building-register.js';
 import type { ParcelLookupClient } from '../geo/parcel.js';
 import {
+  buildFloorPlan,
   reconQuality,
   scaleDimensions,
+  scaleFloorPlan,
   type ReconstructionClient,
   type ScaleReference,
 } from '../recon/reconstruction.js';
@@ -116,21 +119,24 @@ export function createSiteAnalysisRouter(
    * 방 단위 실측 입력(부분 철거용). 건축물대장 연면적은 건물 전체 기준이라, 인테리어
    * 부분 철거처럼 대상 범위가 건물의 일부면 오히려 틀린 값이다. 반면 방 실측은 철거업체가
    * 실사에서 줄자로 재는 값과 같은 종류라 — 사진 눈대중이나 원단위 어림보다 신뢰도가 높다.
-   * 이름·길이·폭이 모두 온전한 방만 인정하고, 나머지는 조용히 걸러 낸다.
+   *
+   * areaM2(3D 복원 평면도가 윤곽으로 잰 면적)가 오면 가로×세로보다 그것을 앞세운다.
+   * 면적이 있으면 가로·세로가 비어 있어도 그 방을 인정한다 — 면적만으로 물량이 나온다.
    */
   function parseRooms(body: Record<string, unknown>): RoomMeasurement[] | undefined {
     if (!Array.isArray(body.rooms)) return undefined;
     const rooms = body.rooms
       .filter((r): r is Record<string, unknown> => typeof r === 'object' && r !== null)
-      .map((r) => ({
-        name: typeof r.name === 'string' && r.name.trim() ? r.name.trim() : '공간',
-        lengthM: Number(r.lengthM),
-        widthM: Number(r.widthM),
-      }))
-      .filter(
-        (r) =>
-          Number.isFinite(r.lengthM) && r.lengthM > 0 && Number.isFinite(r.widthM) && r.widthM > 0,
-      );
+      .map((r) => {
+        const areaM2 = Number(r.areaM2);
+        return {
+          name: typeof r.name === 'string' && r.name.trim() ? r.name.trim() : '공간',
+          lengthM: Number(r.lengthM),
+          widthM: Number(r.widthM),
+          ...(Number.isFinite(areaM2) && areaM2 > 0 ? { areaM2 } : {}),
+        };
+      })
+      .filter((r) => roomAreaM2(r) !== undefined);
     return rooms.length > 0 ? rooms : undefined;
   }
 
@@ -384,6 +390,10 @@ export function createSiteAnalysisRouter(
    * 영상에서 뽑은 프레임으로 3D 복원을 수행한다. 복원 좌표계는 단위가 없으므로,
    * 기준 길이를 함께 주면 실제 치수(㎡·㎥)까지 환산해 돌려준다. 기준이 없으면
    * 형상과 상대 치수만 준다 — 근거 없이 미터를 붙이지 않는다.
+   *
+   * floorPlan(평면도 격자)도 함께 낸다. 점군을 바닥면에 투영한 윤곽이라, 바운딩박스가
+   * 빈 공간까지 삼키던 L자·ㄷ자 공간에서 면적이 실제에 훨씬 가깝다(합성 검증: L자 실제
+   * 18㎡ → 바운딩 24㎡, 평면도 18.4㎡). 벽 둘레도 함께 나와 벽체 물량의 근거가 된다.
    */
   router.post('/recon/reconstruct', async (req, res) => {
     if (!recon) {
@@ -408,11 +418,18 @@ export function createSiteAnalysisRouter(
     const quality = reconQuality(result);
     const ref = parseScaleReference(body.scaleReference);
     const dimensions = ref ? scaleDimensions(result.extent, ref) : undefined;
+    const floorPlan = buildFloorPlan(result.points);
+    // 기준 길이가 있으면 평면도도 미터로 환산해 준다. 없으면 격자만 — 화면에서 기준을
+    // 바꿔 가며 즉시 환산하므로(서버를 다시 부르지 않는다) 격자만 있어도 충분하다.
+    const floorPlanScaled =
+      floorPlan && dimensions ? scaleFloorPlan(floorPlan, dimensions.metersPerUnit) : undefined;
 
     res.json({
       ...result,
       quality,
       ...(dimensions ? { dimensions } : {}),
+      ...(floorPlan ? { floorPlan } : {}),
+      ...(floorPlanScaled ? { floorPlanScaled } : {}),
     });
   });
 

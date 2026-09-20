@@ -259,6 +259,27 @@ describe('방 단위 실측(rooms) — 부분 철거', () => {
     expect(res.body.rooms).toBeUndefined();
   });
 
+  it('평면도 윤곽 면적(areaM2)이 오면 가로×세로 대신 그 값으로 물량을 잡는다', async () => {
+    // L자 공간: 가로×세로로는 24㎡ 지만 평면도가 잰 윤곽은 18.4㎡ 다.
+    const res = await postWasteItems([okAnalyzer()], {
+      imageBase64: IMG,
+      rooms: [{ name: '거실', lengthM: 6, widthM: 4, areaM2: 18.4 }],
+    });
+    const estimate = res.body.estimate as { method: string; floorAreaM2: number } | undefined;
+    expect(estimate?.method).toBe('ROOM_MEASUREMENT');
+    expect(estimate?.floorAreaM2).toBe(18.4);
+    expect(res.body.roomsAreaM2).toBe(18.4);
+  });
+
+  it('가로·세로가 비어 있어도 평면도 면적만으로 물량이 나온다', async () => {
+    const res = await postWasteItems([okAnalyzer()], {
+      imageBase64: IMG,
+      rooms: [{ name: '거실', areaM2: 12.5 }],
+    });
+    const estimate = res.body.estimate as { floorAreaM2: number } | undefined;
+    expect(estimate?.floorAreaM2).toBe(12.5);
+  });
+
   it('길이·폭이 없는 방은 걸러지고, 남는 방이 없으면 rooms 자체가 무시된다', async () => {
     const res = await postWasteItems([okAnalyzer()], {
       imageBase64: IMG,

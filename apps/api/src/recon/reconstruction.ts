@@ -165,9 +165,7 @@ export function scaleDimensions(
   if (!Number.isFinite(ref.realMeters) || ref.realMeters <= 0) return undefined;
 
   const metersPerUnit = ref.realMeters / unit;
-  const dims = [extent.x, extent.y, extent.z]
-    .map((v) => v * metersPerUnit)
-    .sort((a, b) => b - a);
+  const dims = [extent.x, extent.y, extent.z].map((v) => v * metersPerUnit).sort((a, b) => b - a);
 
   const [widthM, depthM, heightM] = dims as [number, number, number];
   const r1 = (n: number) => Math.round(n * 10) / 10;
@@ -178,6 +176,187 @@ export function scaleDimensions(
     floorAreaM2: r1(widthM * depthM),
     volumeM3: r1(widthM * depthM * heightM),
     metersPerUnit,
+  };
+}
+
+/**
+ * 평면도 격자 — 점군을 바닥면에 투영해 위에서 내려다본 도면.
+ *
+ * 왜 필요한가: {@link scaleDimensions} 는 공간을 직육면체 하나로 보고 바운딩박스의 두 변을
+ * 곱해 면적을 낸다. 직사각형 방이면 맞지만 L자 공간이나 방 두 개를 한 영상에 담으면
+ * 빈 공간까지 감싸 면적을 과대평가한다. 점군을 위에서 눌러 보면 벽이 선으로 나타나고,
+ * 그 윤곽이 실제 형상이다 — 여기서 면적과 둘레를 다시 구한다.
+ *
+ * 격자는 단위 없는 복원 좌표계 그대로다. 미터 환산은 {@link scaleFloorPlan} 이 한다
+ * (기준 길이를 바꿀 때마다 복원을 다시 하지 않아도 되게 분리했다).
+ */
+export interface FloorPlanGrid {
+  /** 칸 한 변(복원 좌표 단위). */
+  cellSize: number;
+  cols: number;
+  rows: number;
+  /** 벽·물체가 잡힌 칸(행 우선 인덱스 = row × cols + col). 도면의 선이 되는 칸들. */
+  wallCells: number[];
+  /** 공간 내부로 판정된 칸. 면적 산정의 근거. */
+  footprintCells: number[];
+  /** 내부 칸들의 외곽선 길이(칸 변 개수). 미터 환산은 × cellSize. */
+  perimeterEdges: number;
+  /** 높이로 본 축 — scaleDimensions 와 같은 규칙(가장 짧은 축). */
+  upAxis: 'x' | 'y' | 'z';
+}
+
+/** 평면도를 만들 최소 점 개수. 이보다 적으면 윤곽이 아니라 잡음이다. */
+export const MIN_PLAN_POINTS = 200;
+
+/** 격자 긴 변의 칸 수. 72칸이면 6m 공간에서 한 칸 8cm — 윤곽을 보기 충분하고 전송도 가볍다. */
+const PLAN_GRID = 72;
+
+/**
+ * 이상점 잘라내기 비율. COLMAP 점군에는 공간 밖으로 튄 점이 섞이고, 그대로 두면 격자가
+ * 늘어나 실제 공간이 한쪽 구석에 뭉친다. 축마다 상·하위 2%를 버린다.
+ */
+const PLAN_TRIM = 0.02;
+
+/** 한 축의 이상점을 잘라낸 최소·최대. */
+function trimmedBounds(values: number[]): { min: number; max: number } {
+  const sorted = [...values].sort((a, b) => a - b);
+  const cut = Math.floor(sorted.length * PLAN_TRIM);
+  return { min: sorted[cut]!, max: sorted[sorted.length - 1 - cut]! };
+}
+
+/**
+ * 점군 → 평면도 격자.
+ *
+ * 채우는 방법에 대하여: 벽만 잡혀 속이 빈 경우와, 바닥까지 잡혀 이미 찬 경우가 둘 다 나온다.
+ * 그래서 **행마다 양 끝 사이를 채우고, 열마다 양 끝 사이를 채운 뒤 교집합**을 쓴다. 각각은
+ * 실제 내부를 반드시 포함하는 상한이므로 교집합이 가장 조인 상한이고, L자·ㄷ자처럼 꺾인
+ * 공간에서 바운딩박스가 삼키던 빈 구역이 여기서 빠진다.
+ */
+export function buildFloorPlan(points: readonly number[][]): FloorPlanGrid | undefined {
+  const valid = points.filter(
+    (p) => p.length >= 3 && Number.isFinite(p[0]) && Number.isFinite(p[1]) && Number.isFinite(p[2]),
+  );
+  if (valid.length < MIN_PLAN_POINTS) return undefined;
+
+  const bounds = [0, 1, 2].map((axis) => trimmedBounds(valid.map((p) => p[axis]!)));
+  const spans = bounds.map((b) => b.max - b.min);
+  // 가장 짧은 축을 높이로 본다 — scaleDimensions 와 같은 규칙이어야 두 결과가 어긋나지 않는다.
+  const up = spans.indexOf(Math.min(...spans));
+  const [a, b] = [0, 1, 2].filter((i) => i !== up) as [number, number];
+  const spanA = spans[a]!;
+  const spanB = spans[b]!;
+  if (!(spanA > 0) || !(spanB > 0)) return undefined;
+
+  const cellSize = Math.max(spanA, spanB) / PLAN_GRID;
+  const cols = Math.max(1, Math.ceil(spanA / cellSize));
+  const rows = Math.max(1, Math.ceil(spanB / cellSize));
+
+  /**
+   * 좌표 → 칸 번호. 잘라낸 범위를 벗어난 이상점은 버리고(-1), 범위 안이면 마지막 칸으로
+   * 물린다. 경계에 **정확히** 걸린 점을 버리면 안 된다 — 벽면은 바로 그 경계에 몰려 있어서,
+   * 버리는 순간 반대쪽 두 벽이 도면에서 통째로 사라진다.
+   */
+  const cellOf = (v: number, axis: number, n: number): number => {
+    const { min, max } = bounds[axis]!;
+    if (v < min || v > max) return -1;
+    return Math.min(n - 1, Math.floor((v - min) / cellSize));
+  };
+
+  const counts = new Uint32Array(cols * rows);
+  for (const p of valid) {
+    const ca = cellOf(p[a]!, a, cols);
+    const cb = cellOf(p[b]!, b, rows);
+    if (ca < 0 || cb < 0) continue;
+    counts[cb * cols + ca]! += 1;
+  }
+
+  // 점 하나만 찍힌 칸은 잡음이다. 점이 촘촘한 복원에서는 기준도 함께 올린다.
+  const expected = valid.length / (cols * rows);
+  const threshold = Math.max(2, Math.ceil(expected * 0.5));
+  const wallCells: number[] = [];
+  for (let i = 0; i < counts.length; i += 1) {
+    if (counts[i]! >= threshold) wallCells.push(i);
+  }
+  if (wallCells.length === 0) return undefined;
+
+  const rowFill = new Uint8Array(cols * rows);
+  for (let r = 0; r < rows; r += 1) {
+    let lo = -1;
+    let hi = -1;
+    for (let c = 0; c < cols; c += 1) {
+      if (counts[r * cols + c]! >= threshold) {
+        if (lo < 0) lo = c;
+        hi = c;
+      }
+    }
+    for (let c = lo; c >= 0 && c <= hi; c += 1) rowFill[r * cols + c] = 1;
+  }
+  const colFill = new Uint8Array(cols * rows);
+  for (let c = 0; c < cols; c += 1) {
+    let lo = -1;
+    let hi = -1;
+    for (let r = 0; r < rows; r += 1) {
+      if (counts[r * cols + c]! >= threshold) {
+        if (lo < 0) lo = r;
+        hi = r;
+      }
+    }
+    for (let r = lo; r >= 0 && r <= hi; r += 1) colFill[r * cols + c] = 1;
+  }
+
+  const inside = new Uint8Array(cols * rows);
+  const footprintCells: number[] = [];
+  for (let i = 0; i < inside.length; i += 1) {
+    if (rowFill[i] === 1 && colFill[i] === 1) {
+      inside[i] = 1;
+      footprintCells.push(i);
+    }
+  }
+  if (footprintCells.length === 0) return undefined;
+
+  // 둘레 = 내부 칸이 외부(또는 격자 밖)와 맞닿은 변의 개수.
+  let perimeterEdges = 0;
+  for (const i of footprintCells) {
+    const c = i % cols;
+    const r = (i - c) / cols;
+    if (c === 0 || inside[i - 1] !== 1) perimeterEdges += 1;
+    if (c === cols - 1 || inside[i + 1] !== 1) perimeterEdges += 1;
+    if (r === 0 || inside[i - cols] !== 1) perimeterEdges += 1;
+    if (r === rows - 1 || inside[i + cols] !== 1) perimeterEdges += 1;
+  }
+
+  return {
+    cellSize,
+    cols,
+    rows,
+    wallCells,
+    footprintCells,
+    perimeterEdges,
+    upAxis: (['x', 'y', 'z'] as const)[up]!,
+  };
+}
+
+export interface ScaledFloorPlan {
+  /** 윤곽 기준 바닥면적(㎡) — 직사각형 가정 없이 실제 형상으로 낸 값. */
+  floorAreaM2: number;
+  /** 외곽선 길이(m) — 벽 철거 물량을 잡을 때 쓰는 둘레. */
+  perimeterM: number;
+  /** 칸 한 변(m) — 도면의 해상도. 이보다 작은 요철은 표현되지 않는다. */
+  cellSizeM: number;
+}
+
+/** 평면도 격자를 미터로 환산한다. 기준 길이가 없으면 환산하지 않는다(근거 없는 미터는 안 붙인다). */
+export function scaleFloorPlan(
+  plan: FloorPlanGrid,
+  metersPerUnit: number,
+): ScaledFloorPlan | undefined {
+  if (!Number.isFinite(metersPerUnit) || metersPerUnit <= 0) return undefined;
+  const cellSizeM = plan.cellSize * metersPerUnit;
+  const r1 = (n: number) => Math.round(n * 10) / 10;
+  return {
+    floorAreaM2: r1(plan.footprintCells.length * cellSizeM * cellSizeM),
+    perimeterM: r1(plan.perimeterEdges * cellSizeM),
+    cellSizeM: Math.round(cellSizeM * 1000) / 1000,
   };
 }
 

@@ -817,7 +817,7 @@ export function SiteAnalysisScreen() {
         {loading ? <AnalysisProgress /> : null}
 
         {result ? (
-          <AnalysisResult result={result} estimate={estimate} cost={cost} images={images} />
+          <AnalysisResult result={result} estimate={estimate} cost={cost} images={images} measured={measuredAreaM2 !== null} />
         ) : null}
 
         {/* 로그인이 없어도 수집·이용 고지는 제공한다(사진은 분석 즉시 폐기, 저장하지 않음). */}
@@ -1331,13 +1331,21 @@ function QuoteBasisSection({ quote }: { quote: SiteQuoteBasis }) {
   );
 }
 
-/** 연면적 기반 물량 추정 — 현장에서 실제로 필요한 "몇 톤, 트럭 몇 대"를 보여준다. */
-function VolumeEstimateCard({ estimate }: { estimate: VolumeEstimate }) {
+/**
+ * 물량 추정 — 현장에서 실제로 필요한 "몇 톤, 트럭 몇 대"를 보여준다.
+ *
+ * 면적이 어디서 왔는지를 제목에 적는다. 영상으로 잰 값과 대장 연면적은 뜻이
+ * 다르다 — 앞의 것은 "이 방을 뜯는다", 뒤의 것은 "이 건물이 이만하다" 다.
+ * 둘 다 "연면적 기반" 이라고 쓰면 금액이 왜 그 크기인지 설명되지 않는다.
+ */
+function VolumeEstimateCard({ estimate, measured }: { estimate: VolumeEstimate; measured: boolean }) {
   return (
     <View style={styles.estimateCard}>
       <View style={styles.estimateHead}>
         <AppIcon name="recycle" size={18} color={theme.colors.primary} />
-        <Text style={styles.estimateTitle}>연면적 기반 물량 추정</Text>
+        <Text style={styles.estimateTitle}>
+          {measured ? '영상 실측 면적 기반 물량 추정' : '연면적 기반 물량 추정'}
+        </Text>
         <View style={styles.estimateConfChip}>
           <Text style={styles.estimateConfText}>
             신뢰도 {CONFIDENCE_LABELS[estimate.confidence] ?? estimate.confidence}
@@ -1347,7 +1355,8 @@ function VolumeEstimateCard({ estimate }: { estimate: VolumeEstimate }) {
 
       <Text style={styles.estimateHero}>{estimate.estimatedTons}톤</Text>
       <Text style={styles.estimateRange}>
-        예상 범위 {estimate.rangeMinTons}~{estimate.rangeMaxTons}톤 · 연면적{' '}
+        예상 범위 {estimate.rangeMinTons}~{estimate.rangeMaxTons}톤 ·{' '}
+        {measured ? '영상 실측 바닥면적' : '연면적'}{' '}
         {Math.round(estimate.floorAreaM2).toLocaleString('ko-KR')}㎡
       </Text>
 
@@ -1486,11 +1495,14 @@ function AnalysisResult({
   estimate,
   cost,
   images,
+  measured,
 }: {
   result: SiteAnalysis;
   estimate: VolumeEstimate | null;
   cost: CostEstimate | null;
   images: PickedImage[];
+  /** 면적이 영상 실측에서 왔는지 — 카드 제목이 달라진다. */
+  measured: boolean;
 }) {
   const maxKg = Math.max(0, ...result.materials.map((m) => m.estimatedKg ?? 0));
   return (
@@ -1515,7 +1527,7 @@ function AnalysisResult({
 
       {estimate ? (
         <FadeInUp delay={90}>
-          <VolumeEstimateCard estimate={estimate} />
+          <VolumeEstimateCard estimate={estimate} measured={measured} />
         </FadeInUp>
       ) : null}
 

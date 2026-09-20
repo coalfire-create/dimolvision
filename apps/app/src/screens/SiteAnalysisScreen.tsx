@@ -329,13 +329,16 @@ export function SiteAnalysisScreen() {
           ji: parcel.ji,
         }
       : {};
-    if (area === undefined) {
+    // 주소를 찍었으면 연면적을 직접 입력하지 않아도 된다 — 건축물대장이 알고 있다.
+    // 예전에는 입력란이 비면 견적 경로를 아예 타지 않아, 대장에서 연면적 83,626㎡ 를
+    // 받아 화면에 보여주면서도 "물량 추정 없음" 으로 끝났다.
+    const canEstimate = area !== undefined || parcel !== null;
+    if (!canEstimate) {
       setEstimate(null);
-      // 연면적이 없으면 물량 총량을 모른다 → 금액을 낼 근거가 없으므로 지운다.
+      // 연면적도 주소도 없으면 물량 총량을 모른다 → 금액을 낼 근거가 없다.
       setCost(null);
       const r = await analyzeSite({
         images: payload,
-        ...addr,
         ...(year ? { buildingYear: year } : {}),
       });
       setRegister((r as { buildingRegister?: BuildingRegisterInfo }).buildingRegister ?? null);
@@ -344,12 +347,16 @@ export function SiteAnalysisScreen() {
     }
     const r = await analyzeSiteWasteItems({
       images: payload,
-      floorAreaM2: area,
+      ...(area !== undefined ? { floorAreaM2: area } : {}),
       ...addr,
       ...(structure ? { structure } : {}),
       ...(year ? { buildingYear: year } : {}),
     });
     setRegister(r.buildingRegister ?? null);
+    // 대장에서 온 연면적을 입력란에 채운다. 사용자가 값을 보고 고칠 수 있어야 하고,
+    // 다음 재분석 때 무엇이 쓰였는지도 화면에 드러난다.
+    const regArea = r.buildingRegister?.totalFloorAreaM2;
+    if (area === undefined && regArea && regArea > 0) setPyeong(String(m2ToPyeong(regArea)));
     setEstimate(r.estimate ?? null);
     setCost(r.cost ?? null);
     setResult(r.analysis);
@@ -614,9 +621,11 @@ export function SiteAnalysisScreen() {
             <View style={styles.areaCard}>
               <Text style={styles.areaTitle}>건물 정보 (선택)</Text>
               <Text style={styles.areaSub}>
-                {result
-                  ? '연면적·건축년도를 입력해 다시 분석하면 물량과 석면 판단이 정밀해집니다.'
-                  : '비워두면 소재·공정만 분석합니다.'}
+                {parcel
+                  ? '건축물대장에서 자동으로 채웁니다. 실제와 다르면 직접 고쳐 다시 분석하세요.'
+                  : result
+                    ? '연면적·건축년도를 입력해 다시 분석하면 물량과 석면 판단이 정밀해집니다.'
+                    : '비워두면 소재·공정만 분석합니다. 지도에서 주소를 찍으면 자동으로 채워집니다.'}
               </Text>
               <View style={styles.fieldRow}>
                 <View style={styles.field}>

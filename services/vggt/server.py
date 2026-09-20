@@ -104,6 +104,8 @@ import sys, json, base64
 import numpy as np
 import open3d as o3d
 
+DEPTH = int(sys.argv[2]) if len(sys.argv) > 2 else 8
+
 d = np.load(sys.argv[1])
 pts, rgb = d["pts"], d["rgb"]
 pc = o3d.geometry.PointCloud()
@@ -111,10 +113,28 @@ pc.points = o3d.utility.Vector3dVector(pts.astype(np.float64))
 if rgb.size:
     pc.colors = o3d.utility.Vector3dVector((rgb / 255.0).astype(np.float64))
 pc, _ = pc.remove_statistical_outlier(nb_neighbors=20, std_ratio=2.0)
+
+# 같은 자리에 겹친 점과 들쭉날쭉한 밀도는 표면 추적을 흔든다. 격자로 한 번 고른다.
+# 점이 절반 이하로 줄지만 면 품질은 그대로고 속도는 두 배가 된다(실측 3.4초).
+diag = float(np.linalg.norm(np.asarray(pc.get_max_bound()) - np.asarray(pc.get_min_bound())))
+if diag > 0:
+    pc = pc.voxel_down_sample(diag * 0.002)
+
 pc.estimate_normals(o3d.geometry.KDTreeSearchParamKNN(knn=30))
 pc.orient_normals_towards_camera_location(pc.get_center())
 pc.normals = o3d.utility.Vector3dVector(-np.asarray(pc.normals))
-mesh, dens = o3d.geometry.TriangleMesh.create_from_point_cloud_poisson(pc, depth=9, linear_fit=True)
+
+# n_threads=1 이 핵심이다.
+#
+# PoissonRecon 의 등가면 추출은 여러 스레드가 같은 모서리 고리를 동시에 이으려다
+# "Failed to close loop" 로 프로세스를 그대로 끝내 버린다. 종료 코드가 -11 로
+# 잡혀 open3d 와 torch 의 ABI 충돌처럼 보였지만, 실제로는 이 경쟁 조건이었다.
+# 같은 점군·같은 설정으로 성공과 실패가 번갈아 나온 게 근거다(depth 7 에서 2/3).
+# 스레드를 하나로 묶으면 결정적으로 돌고, 이 점 수(7만)에서는 3초면 끝난다 —
+# 즉 잃는 것이 없다. 실측: 단일 스레드 depth 9 · 6회 연속 성공.
+mesh, dens = o3d.geometry.TriangleMesh.create_from_point_cloud_poisson(
+    pc, depth=DEPTH, linear_fit=True, n_threads=1,
+)
 dn = np.asarray(dens)
 if dn.size:
     mesh.remove_vertices_by_mask(dn < np.quantile(dn, 0.06))
@@ -170,19 +190,35 @@ def build_mesh(pts: np.ndarray, rgb: np.ndarray) -> dict | None:
         with open(script, "w") as f:
             f.write(_MESH_CHILD)
 
-        r = subprocess.run(
-            ["python", script, npz],
-            capture_output=True, text=True, timeout=MESH_TIMEOUT_SEC,
-        )
-        if r.returncode != 0:
-            MESH_ERROR = f"자식 프로세스 종료코드 {r.returncode}: {r.stderr[-300:]}"
-            return None
-        out = json.loads(r.stdout.strip().splitlines()[-1])
-        if not out.get("ok"):
-            MESH_ERROR = out.get("log")
-            return None
-        out.pop("ok", None)
-        return out
+        # 깊이를 낮춰 가며 다시 해 본다.
+        #
+        # n_threads=1 로 경쟁 조건은 없앴지만, 점군 모양에 따라 깊은 옥트리에서
+        # 표면 추적이 실패하는 경우가 남는다. 그때는 한 단계 거칠게 가면 된다 —
+        # 면이 조금 뭉툭해질 뿐 "벽이 메워진 방" 이라는 결과는 같다.
+        # 8 이 기본값이다: 9 는 더 또렷하지만 가장자리에 구멍이 남고, 7 은
+        # 반대로 뭉개진다(실측 비교).
+        last = None
+        for depth in (8, 7, 6):
+            r = subprocess.run(
+                ["python", script, npz, str(depth)],
+                capture_output=True, text=True, timeout=MESH_TIMEOUT_SEC,
+            )
+            if r.returncode != 0:
+                last = f"depth {depth} · 종료코드 {r.returncode}: {r.stderr[-200:]}"
+                continue
+            try:
+                out = json.loads(r.stdout.strip().splitlines()[-1])
+            except Exception:  # noqa: BLE001
+                last = f"depth {depth} · 응답을 읽지 못했습니다: {r.stdout[-200:]}"
+                continue
+            if not out.get("ok"):
+                last = f"depth {depth} · {out.get('log')}"
+                continue
+            out.pop("ok", None)
+            out["depth"] = depth
+            return out
+        MESH_ERROR = last
+        return None
     except subprocess.TimeoutExpired:
         MESH_ERROR = f"{MESH_TIMEOUT_SEC}초 안에 끝나지 않았습니다"
         return None

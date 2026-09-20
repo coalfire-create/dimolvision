@@ -312,9 +312,20 @@ export function createSiteAnalysisRouter(
       const register = await lookupRegister(body);
       const analysis = await analyzeCached(withRegisterHints(input, register));
 
-      // 대장 값이 사용자가 적어낸 값보다 정확하다 — 연면적은 이미 전체 면적이므로 층수를 곱하지 않는다.
-      const area = register?.totalFloorAreaM2 ?? floorAreaM2;
-      const effFloors = register?.totalFloorAreaM2 !== undefined ? undefined : floors;
+      // 어느 면적을 쓸 것인가 — 여기서 물량과 금액이 통째로 갈린다.
+      //
+      // 대장 연면적을 우선했었다. 공공데이터가 사람이 대충 적은 평수보다 정확하다고
+      // 본 것이다. 그런데 그 사이 영상으로 바닥면적을 **재는** 기능이 생겼다.
+      // 영상으로 잰 한 층 126㎡ 를 보내도 대장의 건물 전체 연면적 578㎡ 가 이겨서,
+      // 방 한 칸 내부 철거에 5층 건물 전체 물량(912톤)이 잡혔다(실측).
+      //
+      // 사용자가 면적을 보냈다는 건 "이만큼을 철거한다" 를 말한 것이다. 건물이
+      // 얼마나 큰지와 무엇을 뜯을지는 다른 문제다. 보낸 값이 있으면 그걸 쓴다.
+      // 대장은 아무 말이 없을 때의 기본값으로 남는다.
+      const area = floorAreaM2 ?? register?.totalFloorAreaM2;
+      // 층수를 곱할지: 사용자가 준 면적이면 그 사람이 말한 층수를 따르고,
+      // 대장 연면적이면 이미 전체 면적이므로 곱하지 않는다.
+      const effFloors = floorAreaM2 !== undefined ? floors : undefined;
       const effStructure = register?.structure ?? structure;
 
       let totalKg: number | undefined;

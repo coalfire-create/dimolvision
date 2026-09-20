@@ -4,9 +4,13 @@
  * 건축물대장 API 는 주소 문자열을 받지 않는다. 시군구코드(5) + 법정동코드(5) +
  * 번(4) + 지(4) 를 요구한다. 그래서 지도에서 찍은 좌표를 이 형식으로 옮겨야 한다.
  *
- * 카카오 로컬 API 를 쓰는 이유: coord2address 응답의 b_code 가 10자리 법정동코드라
- * 앞 5자리가 시군구, 뒤 5자리가 법정동으로 그대로 잘라 쓸 수 있고, 본번·부번도 함께 온다.
- * 건축물대장이 요구하는 네 값이 한 번의 호출로 전부 나온다.
+ * 카카오 로컬 API 를 쓰는데, **두 엔드포인트를 합쳐야** 한다. 실제로 확인해 보면
+ * 필요한 네 값이 한쪽에 다 있지 않다:
+ *   coord2address     → 본번(main_address_no)·부번(sub_address_no)·산 여부·지번 주소
+ *                       (b_code 는 응답에 없다)
+ *   coord2regioncode  → region_type 'B' 항목의 code 가 10자리 법정동코드
+ *                       (본번·부번은 없다)
+ * 그래서 두 번 호출해 합친다. 둘은 서로 독립이라 병렬로 부른다.
  *
  * 키가 없으면 비활성된다 — 지도 없이 코드를 직접 입력하는 경로는 그대로 남는다.
  */
@@ -47,16 +51,21 @@ export class ParcelLookupClient {
     const timer = setTimeout(() => controller.abort(), this.config.timeoutMs);
     try {
       const base = this.config.baseUrl ?? DEFAULT_BASE;
-      const res = await fetch(
-        `${base}/v2/local/geo/coord2address.json?x=${lng}&y=${lat}`,
-        {
-          signal: controller.signal,
-          headers: { Authorization: `KakaoAK ${this.config.restApiKey}` },
-        },
-      );
-      if (!res.ok) return undefined;
-      const body = (await res.json()) as KakaoCoord2Address;
-      return toParcel(body);
+      const init = {
+        signal: controller.signal,
+        headers: { Authorization: `KakaoAK ${this.config.restApiKey}` },
+      };
+      // 지번(본번·부번)과 법정동코드는 서로 다른 엔드포인트에 있다. 순서 의존이 없으니 함께 부른다.
+      const [addrRes, regionRes] = await Promise.all([
+        fetch(`${base}/v2/local/geo/coord2address.json?x=${lng}&y=${lat}`, init),
+        fetch(`${base}/v2/local/geo/coord2regioncode.json?x=${lng}&y=${lat}`, init),
+      ]);
+      if (!addrRes.ok || !regionRes.ok) return undefined;
+      const [addr, region] = (await Promise.all([addrRes.json(), regionRes.json()])) as [
+        KakaoCoord2Address,
+        KakaoCoord2RegionCode,
+      ];
+      return toParcel(addr, region);
     } catch {
       return undefined;
     } finally {
@@ -74,7 +83,6 @@ export function isValidCoord(lat: number, lng: number): boolean {
 
 interface KakaoAddress {
   address_name?: string;
-  b_code?: string;
   mountain_yn?: string;
   main_address_no?: string;
   sub_address_no?: string;
@@ -87,23 +95,38 @@ interface KakaoCoord2Address {
   }>;
 }
 
+/** region_type: 'B' 는 법정동, 'H' 는 행정동. 건축물대장은 **법정동** 코드를 쓴다. */
+interface KakaoCoord2RegionCode {
+  documents?: Array<{
+    region_type?: string;
+    code?: string;
+    address_name?: string;
+  }>;
+}
+
 /**
  * 카카오 응답 → 대장 조회용 코드.
  * b_code 가 10자리가 아니면 지번을 특정할 수 없으므로 포기한다(추측하지 않는다).
  */
-export function toParcel(body: KakaoCoord2Address): ParcelAddress | undefined {
+export function toParcel(
+  body: KakaoCoord2Address,
+  region: KakaoCoord2RegionCode,
+): ParcelAddress | undefined {
   const doc = body.documents?.[0];
   const a = doc?.address;
-  const bcode = (a?.b_code ?? '').trim();
+  // 행정동('H')을 쓰면 건축물대장이 조회되지 않는다. 반드시 법정동('B')이어야 한다.
+  const bcode = (region.documents?.find((d) => d.region_type === 'B')?.code ?? '').trim();
   if (bcode.length !== 10) return undefined;
+  // 지번이 없으면 대장을 특정할 수 없다(도로 한가운데를 찍은 경우 등).
+  if (!a) return undefined;
 
   return {
     sigunguCd: bcode.slice(0, 5),
     bjdongCd: bcode.slice(5),
-    bun: pad4(a?.main_address_no),
-    ji: pad4(a?.sub_address_no),
-    platGbCd: a?.mountain_yn === 'Y' ? '1' : '0',
-    jibunAddress: (a?.address_name ?? '').trim(),
+    bun: pad4(a.main_address_no),
+    ji: pad4(a.sub_address_no),
+    platGbCd: a.mountain_yn === 'Y' ? '1' : '0',
+    jibunAddress: (a.address_name ?? '').trim(),
     ...(doc?.road_address?.address_name
       ? { roadAddress: doc.road_address.address_name.trim() }
       : {}),

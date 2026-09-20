@@ -42,22 +42,23 @@ export function isValidSpacing(px: number): boolean {
  * 메인 블루(#2F6BD8)는 흰 텍스트 대비 4.98:1 로 WCAG AA(4.5:1)를 만족한다.
  */
 export const COLORS = {
-  /** 메인 — 주요 버튼, 활성 상태. 로고 워드마크 딥블루. */
-  primary: '#2C55E9',
+  /** 메인 — 주요 버튼, 활성 상태. 조금 더 깊이있고 세련된 블루톤 */
+  primary: '#2451F5',
   /** 메인 진한 톤 — 눌림/헤더/그라데이션 하단. */
-  primaryDark: '#193CB5',
-  /** 메인 연한 톤 — 선택·강조 배경(연한 브랜드 틴트). */
-  primarySoft: '#EAEFFD',
+  primaryDark: '#1A3AB5',
+  /** 메인 연한 톤 — 선택·강조 배경(연한 브랜드 틴트). 투명감 있는 느낌 */
+  primarySoft: '#F0F4FF',
   /** 보조 — 로고 오렌지색. 강조 배지·아이콘 포인트. */
-  secondary: '#FF5D28',
-  /** 본문 텍스트 (흰 배경 대비 15.3:1). */
-  text: '#1A1A1A',
-  /** 보조 텍스트 — 대비 4.5:1 이상 유지. */
-  textMuted: '#595959',
+  secondary: '#FF6B3B',
+  /** 본문 텍스트 (흰 배경 대비 15.3:1). 완전한 검정보다는 약간의 먹색이 고급스러움 */
+  text: '#1C1C1E',
+  /** 보조 텍스트 — 대비 4.5:1 이상 유지. 너무 진하지 않게 */
+  textMuted: '#8E8E93',
   background: '#FFFFFF',
-  /** 카드·섹션 배경 — 아주 옅은 블루그레이(브랜드 톤). */
-  surface: '#F6F7F9',
-  border: '#DCE3F0',
+  /** 카드·섹션 배경 — 아주 옅은 블루그레이(브랜드 톤). iOS 그룹 테이블 배경과 유사 */
+  surface: '#F4F5F7',
+  /** 경계선 색상 - 아주 연하고 부드럽게 */
+  border: '#E8EAED',
   /** 오류/필수 경고 전용. */
-  error: '#C62828',
+  error: '#FF3B30', // iOS Error Red
 } as const;

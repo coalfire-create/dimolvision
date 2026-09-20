@@ -20,8 +20,8 @@ const useNativeDriver = Platform.OS !== 'web';
 export function FadeInUp({
   children,
   delay = 0,
-  offset = 14,
-  duration = 420,
+  offset = 24, // 조금 더 많이 내려갔다가 부드럽게 올라오도록
+  duration = 500, // 살짝 더 여유있는 듀레이션
   style,
 }: {
   children: React.ReactNode;
@@ -36,7 +36,8 @@ export function FadeInUp({
       toValue: 1,
       duration,
       delay,
-      easing: Easing.out(Easing.cubic),
+      // 조금 더 탄력있는 이징 함수 (Apple 스프링 느낌과 유사하게)
+      easing: Easing.bezier(0.25, 1, 0.5, 1),
       useNativeDriver,
     });
     anim.start();
@@ -60,14 +61,14 @@ export function FadeInUp({
 }
 
 /** 누르면 살짝 작아졌다 튕겨 돌아오는 스케일 값 + 핸들러. */
-export function usePressScale(to = 0.97) {
+export function usePressScale(to = 0.95) { // 0.97에서 0.95로 눌림 효과 증대
   const scale = useRef(new Animated.Value(1)).current;
   const spring = (toValue: number, bounciness: number) =>
-    Animated.spring(scale, { toValue, speed: 40, bounciness, useNativeDriver }).start();
+    Animated.spring(scale, { toValue, speed: 20, bounciness, useNativeDriver }).start(); // 스피드를 낮추고 바운시니스 조절
   return {
     scale,
-    onPressIn: () => spring(to, 0),
-    onPressOut: () => spring(1, 6),
+    onPressIn: () => spring(to, 2),
+    onPressOut: () => spring(1, 10), // 손을 뗐을 때 조금 더 기분좋게 튕기도록
   };
 }
 

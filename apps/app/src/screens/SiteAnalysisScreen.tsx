@@ -1354,17 +1354,16 @@ const styles = StyleSheet.create({
     alignSelf: 'center',
   },
   
-  /* 히어로 AI 카드 */
+  /* 히어로 AI 카드 - 프리미엄 앱 스타일의 깊이있는 글래스모피즘 톤 */
   heroCard: {
-    backgroundColor: '#0F172A',
-    borderRadius: radius.card,
+    backgroundColor: '#121526', // 약간 푸른 빛이 도는 깊은 다크
+    borderRadius: radius.card * 1.2, // 살짝 더 둥글게
     padding: spacing.md,
     marginBottom: spacing.md,
-    shadowColor: '#1E293B',
-    shadowOpacity: 0.15,
-    shadowRadius: 16,
-    shadowOffset: { width: 0, height: 6 },
-    elevation: 4,
+    ...theme.shadow.primary, // 프리미엄 쉐도우 사용
+    shadowOpacity: 0.25,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
   },
   heroBadgeRow: {
     flexDirection: 'row',
@@ -1406,13 +1405,15 @@ const styles = StyleSheet.create({
     marginTop: spacing.xs,
   },
   heroChip: {
-    backgroundColor: 'rgba(255, 255, 255, 0.08)',
-    borderRadius: 6,
+    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+    borderRadius: 8,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 4,
-    paddingHorizontal: 8,
-    paddingVertical: 4,
+    gap: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderWidth: 0.5,
+    borderColor: 'rgba(255,255,255,0.1)',
   },
   heroChipText: {
     color: '#94A3B8',
@@ -1420,18 +1421,19 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
 
-  /* 업로드 드롭존 */
+  /* 업로드 드롭존 - 너무 튀는 대시보드 느낌 제거하고 둥글고 부드럽게 */
   dropzone: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.sm,
-    backgroundColor: '#F8FAFC',
+    backgroundColor: colors.background, // 새하얀 배경에 은은한 쉐도우
     borderRadius: radius.card,
     borderWidth: 1.5,
-    borderColor: '#CBD5E1',
-    borderStyle: 'dashed',
+    borderColor: colors.primarySoft, // 부드러운 브랜드 컬러 보더
     padding: spacing.md,
     marginBottom: spacing.md,
+    ...theme.shadow.card,
+    shadowOpacity: 0.03,
   },
   iconCircle: {
     width: 48,
@@ -1481,8 +1483,9 @@ const styles = StyleSheet.create({
     borderColor: colors.border,
     borderWidth: 1,
     borderRadius: radius.card,
-    padding: spacing.md,
+    padding: spacing.lg, // 좀 더 여유있게
     marginBottom: spacing.md,
+    ...theme.shadow.card, // 하드한 보더 대신 부드러운 그림자 추가
   },
   sampleHeadTitle: {
     color: colors.text,

@@ -269,7 +269,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     zIndex: 50,
-    ...theme.shadow.primary,
+    ...theme.shadow.floating, // primary 대신 floating 그림자 사용
   },
   fabIcon: {
     fontSize: 26,
@@ -302,6 +302,9 @@ const styles = StyleSheet.create({
     height: touch.minButtonHeight,
     justifyContent: 'center',
     paddingHorizontal: spacing.md,
+    // 보조 버튼에도 옅은 입체감 추가
+    ...theme.shadow.card,
+    shadowOpacity: 0.02,
   },
   buttonPrimary: {
     backgroundColor: colors.primary,
@@ -328,9 +331,9 @@ const styles = StyleSheet.create({
     backgroundColor: colors.background,
     borderColor: colors.border,
     borderRadius: radius.card,
-    borderWidth: 1,
+    borderWidth: 1, // 필요하다면 보더를 0.5로 하거나 지울 수도 있지만, 깔끔함을 위해 유지
     marginBottom: spacing.sm,
-    padding: spacing.md,
+    padding: spacing.lg, // 카드의 내부 여백을 더 시원하게 (md -> lg)
     ...theme.shadow.card,
   },
   badge: {
@@ -350,18 +353,22 @@ const styles = StyleSheet.create({
     marginBottom: spacing.xs,
   },
   fieldInput: {
-    backgroundColor: colors.surface,
-    borderColor: 'transparent',
+    backgroundColor: colors.background, // 기본 상태에서도 백그라운드를 흰색으로
+    borderColor: colors.border,
     borderRadius: radius.button,
-    borderWidth: 2,
+    borderWidth: 1,
     color: colors.text,
     fontSize: font.bodyLarge,
     minHeight: touch.primaryButtonHeight,
-    paddingHorizontal: spacing.sm,
+    paddingHorizontal: spacing.md, // 좀 더 여유있게
+    ...theme.shadow.card, // 인풋 필드에도 미세한 그림자
+    shadowOpacity: 0.02,
   },
   fieldInputFocused: {
-    backgroundColor: colors.background,
     borderColor: colors.primary,
+    borderWidth: 2, // 포커스 될 때만 더 뚜렷하게
+    ...theme.shadow.floating, // 포커스 시 살짝 떠오르는 느낌
+    shadowOpacity: 0.06,
   },
   fieldHint: {
     color: colors.textMuted,

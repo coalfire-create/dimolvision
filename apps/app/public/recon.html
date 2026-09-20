@@ -955,7 +955,7 @@ let CAPTURE_QUALITY = 0.58;
        * 없으면 실루엣만 보인다 — 그래서 조명을 함께 넣는다.
        * 실패하면 false 를 돌려 호출부가 점군으로 돌아가게 한다.
        */
-      function addMesh(mesh, center) {
+      function addMesh(mesh, center, upSign = 1) {
         try {
           const v = new Float32Array(b64ToBytes(mesh.verticesB64).buffer);
           const f = new Uint32Array(b64ToBytes(mesh.facesB64).buffer);
@@ -964,7 +964,7 @@ let CAPTURE_QUALITY = 0.58;
           const pos = new Float32Array(v.length);
           for (let i = 0; i < v.length; i += 3) {
             pos[i] = v[i] - center[0];
-            pos[i + 1] = v[i + 1] - center[1];
+            pos[i + 1] = (v[i + 1] - center[1]) * upSign;
             pos[i + 2] = v[i + 2] - center[2];
           }
           const g = new THREE.BufferGeometry();
@@ -1037,7 +1037,9 @@ let CAPTURE_QUALITY = 0.58;
 
         scene = new THREE.Scene();
         scene.background = new THREE.Color(0x0f172a);
-        camera = new THREE.PerspectiveCamera(55, w / h, 0.01, 5000);
+        // 실내는 시야가 좁으면 벽 한 조각만 보여 방으로 읽히지 않는다.
+        // 부동산 실내 촬영이 광각을 쓰는 것과 같은 이유로 75° 를 쓴다.
+        camera = new THREE.PerspectiveCamera(75, w / h, 0.01, 5000);
         renderer = new THREE.WebGLRenderer({ antialias: true });
         renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
         renderer.setSize(w, h);
@@ -1051,6 +1053,39 @@ let CAPTURE_QUALITY = 0.58;
           c[0] += points[i * 3]; c[1] += points[i * 3 + 1]; c[2] += points[i * 3 + 2];
         }
         c.forEach((_, i) => (c[i] /= n || 1));
+
+        // 위쪽이 어디인지 정한다 — 이게 틀리면 방이 뒤집혀 "방" 으로 읽히지 않는다.
+        //
+        // VGGT 의 좌표계는 첫 장면 카메라 기준이고, 카메라 좌표계는 y 가 **아래**다.
+        // 그대로 three.js(+Y 가 위)에 넣으면 바닥이 천장 자리로 올라간다. 화면
+        // 위쪽만 꽉 차고 아래는 텅 비던 게 그것이었다(실측: 점이 가장 몰린 높이가
+        // 카메라보다 +y 쪽, 즉 화면상 위쪽에 있었다).
+        //
+        // 규약을 믿고 무조건 뒤집지는 않는다. 바닥은 평평하고 넓어 높이 분포에서
+        // 언제나 가장 큰 봉우리를 만든다. 그 봉우리가 카메라보다 아래로 가도록
+        // 부호를 정한다 — 데이터가 규약과 다르게 나와도 바로 선다.
+        const upSign = (() => {
+          const ys = new Float32Array(n);
+          for (let i = 0; i < n; i++) ys[i] = points[i * 3 + 1];
+          const sy = Float32Array.from(ys).sort();
+          const lo = sy[Math.floor(n * 0.02)], hi = sy[Math.floor(n * 0.98)];
+          if (!(hi > lo)) return 1;
+          const B = 32, hist = new Int32Array(B);
+          for (let i = 0; i < n; i++) {
+            const b = Math.floor(((ys[i] - lo) / (hi - lo)) * B);
+            if (b >= 0 && b < B) hist[b]++;
+          }
+          let peak = 0;
+          for (let b = 1; b < B; b++) if (hist[b] > hist[peak]) peak = b;
+          const floorY = lo + ((hi - lo) * (peak + 0.5)) / B;
+          // 눈높이 기준. 카메라 위치를 모르면 점의 중앙값을 대신 쓴다.
+          const eyeY = cameras && cameras.length
+            ? cameras.reduce((s, p) => s + p[1], 0) / cameras.length
+            : sy[Math.floor(n * 0.5)];
+          return floorY > eyeY ? -1 : 1;
+        })();
+        /** 원점으로 옮기고 위아래를 바로 세운다. */
+        const fy = (y) => (y - c[1]) * upSign;
 
         // 바깥으로 튄 점이 몇 개만 있어도 화면이 통째로 줄어든다. 중앙값 거리로 크기를
         // 잡고 그 몇 배를 넘는 점은 그리지 않는다 — 방이 화면을 채우게 하려는 것이다.
@@ -1068,7 +1103,7 @@ let CAPTURE_QUALITY = 0.58;
         const col = colors ? new Float32Array(points.length) : null;
         for (let i = 0; i < n; i++) {
           if (dists[i] > cut) continue;
-          const x = points[i * 3] - c[0], y = points[i * 3 + 1] - c[1], z = points[i * 3 + 2] - c[2];
+          const x = points[i * 3] - c[0], y = fy(points[i * 3 + 1]), z = points[i * 3 + 2] - c[2];
           pos[k * 3] = x; pos[k * 3 + 1] = y; pos[k * 3 + 2] = z;
           if (col) {
             // three.js 색은 0~1 이다. 약간 밝혀 어두운 실내도 형상이 보이게 한다.
@@ -1101,7 +1136,7 @@ let CAPTURE_QUALITY = 0.58;
 
         // 메시가 있으면 면을 그린다. 점을 크게 찍어 겹치게 하면 멀리서만 벽처럼
         // 보이고 가까이 가면 다시 점이다. 삼각형 면이라야 진짜 벽이다.
-        const built = mesh && addMesh(mesh, c);
+        const built = mesh && addMesh(mesh, c, upSign);
         if (!built) {
           cloud = new THREE.Points(geo, new THREE.PointsMaterial({
             ...(col ? { vertexColors: true } : { color: 0x93c5fd }),
@@ -1117,15 +1152,23 @@ let CAPTURE_QUALITY = 0.58;
 
         // 촬영 동선 — 어디를 돌며 찍었는지 보이면 빠진 구간을 알 수 있다.
         // 이 좌표들이 곧 "사람이 서 있던 자리" 라 실내 시점의 기준이 된다.
-        const camPath = (cameras ?? []).map((p) => [p[0] - c[0], p[1] - c[1], p[2] - c[2]]);
+        const camPath = (cameras ?? []).map((p) => [p[0] - c[0], fy(p[1]), p[2] - c[2]]);
+        // 시점의 기준점 — 사람이 서 있던 자리의 한가운데.
+        const pivot0 = camPath.length
+          ? camPath.reduce((a, p) => [a[0] + p[0] / camPath.length,
+                                      a[1] + p[1] / camPath.length,
+                                      a[2] + p[2] / camPath.length], [0, 0, 0])
+          : [0, 0, 0];
+        let pathLine = null;
         if (cameras && cameras.length > 1) {
           const cp = new Float32Array(cameras.length * 3);
           cameras.forEach((p, i) => {
-            cp[i * 3] = p[0] - c[0]; cp[i * 3 + 1] = p[1] - c[1]; cp[i * 3 + 2] = p[2] - c[2];
+            cp[i * 3] = p[0] - c[0]; cp[i * 3 + 1] = fy(p[1]); cp[i * 3 + 2] = p[2] - c[2];
           });
           const cg = new THREE.BufferGeometry();
           cg.setAttribute('position', new THREE.BufferAttribute(cp, 3));
-          scene.add(new THREE.Line(cg, new THREE.LineBasicMaterial({ color: 0xff5d28 })));
+          pathLine = new THREE.Line(cg, new THREE.LineBasicMaterial({ color: 0xff5d28 }));
+          scene.add(pathLine);
         }
 
         // 방이 화면을 채워야 형태가 읽힌다. 2.6배는 너무 멀어 덩어리로 보였다.
@@ -1135,32 +1178,48 @@ let CAPTURE_QUALITY = 0.58;
         // 실제로 사람은 방 안에서 찍었으므로, 촬영 동선의 한가운데(= 그 사람이 서 있던
         // 자리)에 카메라를 두고 둘러보게 한다. 밖에서 전체를 보고 싶으면 휠로 빼면 된다.
         const inside = camPath.length > 0;
-        let rx = 0.05, ry = 0.6, dragging = false, lx = 0, ly = 0;
-        // 안에서 볼 때는 눈높이에서 조금만 물러난 거리로 시작한다.
-        let dist = inside ? Math.max(maxR * 0.12, 0.35) : maxR * 1.5;
-        // 회전 중심 — 안에서 보면 촬영 동선의 중심이 곧 방의 한가운데다.
-        const pivot = inside
-          ? camPath.reduce((a, p) => [a[0] + p[0] / camPath.length,
-                                      a[1] + p[1] / camPath.length,
-                                      a[2] + p[2] / camPath.length], [0, 0, 0])
-          : [0, 0, 0];
 
+        // 처음 보이는 방향이 결과를 좌우한다. 아무 각도나 잡으면 벽 사이 빈 구석을
+        // 마주 보게 되어 "점 몇 덩어리" 로 보인다. 점이 가장 많이 몰린 방위를 찾아
+        // 그쪽을 정면으로 둔다 — 열어 보자마자 벽 한 면이 꽉 차게 하려는 것이다.
+        const startAzimuth = (() => {
+          const B = 48, hist = new Float64Array(B);
+          for (let i = 0; i < k; i++) {
+            const dx = pos[i * 3] - pivot0[0], dz = pos[i * 3 + 2] - pivot0[2];
+            const r = Math.hypot(dx, dz);
+            if (r < 1e-6) continue;
+            const t = Math.atan2(dx, dz);           // 0 = +z 방향
+            const bIdx = Math.floor(((t + Math.PI) / (2 * Math.PI)) * B) % B;
+            hist[bIdx] += 1;
+          }
+          let peak = 0;
+          for (let i = 1; i < B; i++) if (hist[i] > hist[peak]) peak = i;
+          return ((peak + 0.5) / B) * 2 * Math.PI - Math.PI;
+        })();
+        // 카메라는 -dir 쪽을 본다. 그 방위를 정면에 두려면 ry = 방위 + π.
+        let rx = 0.0, ry = startAzimuth + Math.PI, dragging = false, lx = 0, ly = 0;
+        // 회전 중심 — 안에서 보면 촬영 동선의 중심이 곧 방의 한가운데다.
+        const pivot = inside ? pivot0 : [0, 0, 0];
+
+        // 뒤로 물러난 정도. 방 반지름의 배수라 단위가 없는 복원 좌표계에서도 뜻이 같다.
+        //   0   = 사람이 서 있던 바로 그 자리 (실내 시점의 기본값)
+        //   0.8 이상 = 방 밖으로 나가 전체를 내려다보는 시점
+        // 휠이 이 값을 움직여 실내 ↔ 전체가 끊김 없이 이어진다.
+        let back = inside ? 0 : 1.5;
         const apply = () => {
-          camera.position.set(
-            pivot[0] + dist * Math.cos(rx) * Math.sin(ry),
-            pivot[1] + dist * Math.sin(rx),
-            pivot[2] + dist * Math.cos(rx) * Math.cos(ry),
-          );
-          // 안에서 볼 때는 바깥(벽)을 본다 — 중심을 보면 자기 뒤통수를 보는 셈이다.
-          if (inside) {
-            camera.lookAt(
-              pivot[0] - Math.cos(rx) * Math.sin(ry) * maxR,
-              pivot[1] - Math.sin(rx) * maxR,
-              pivot[2] - Math.cos(rx) * Math.cos(ry) * maxR,
-            );
+          const dx = Math.cos(rx) * Math.sin(ry), dy = Math.sin(rx), dz = Math.cos(rx) * Math.cos(ry);
+          const t = maxR * back;
+          camera.position.set(pivot[0] + dx * t, pivot[1] + dy * t, pivot[2] + dz * t);
+          // 안에서는 바깥(벽)을 본다 — 중심을 보면 자기 뒤통수를 보는 셈이다.
+          // 충분히 물러나면 방 전체가 앞에 놓이므로 그때는 중심을 본다.
+          if (inside && back < 0.8) {
+            camera.lookAt(pivot[0] - dx * maxR, pivot[1] - dy * maxR, pivot[2] - dz * maxR);
           } else {
             camera.lookAt(pivot[0], pivot[1], pivot[2]);
           }
+          // 동선 선은 방 안에서 보면 코앞을 가로지르는 주황색 낙서가 된다.
+          // 어디를 빠뜨렸는지 보려고 그리는 것이니, 밖에서 전체를 볼 때만 보인다.
+          if (pathLine) pathLine.visible = back >= 0.8;
         };
         apply();
 
@@ -1176,7 +1235,8 @@ let CAPTURE_QUALITY = 0.58;
         el.addEventListener('wheel', e => {
           e.preventDefault();
           // 안에서 시작하더라도 끝까지 빼면 전체를 밖에서 볼 수 있어야 한다.
-          dist = Math.max(maxR * 0.05, Math.min(maxR * 8, dist * (1 + Math.sign(e.deltaY) * 0.12)));
+          // -0.4 까지 허용한다 — 보고 있는 벽 쪽으로 한 걸음 더 다가갈 수 있게.
+          back = Math.max(-0.4, Math.min(6, back + Math.sign(e.deltaY) * 0.12));
           apply();
         }, { passive: false });
 

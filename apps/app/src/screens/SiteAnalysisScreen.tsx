@@ -1497,14 +1497,15 @@ const styles = StyleSheet.create({
     backgroundColor: colors.surface,
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 4, // 박스형으로 샤프하게
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: radius.badge, // 우아한 곡률로 복구
     borderWidth: 1,
     borderColor: colors.border,
+    ...theme.shadow.card, // 은은한 그림자
   },
   heroCardBadgeText: {
-    color: colors.textMuted,
+    color: colors.primary, // 프리미엄 블루 포인트
     fontSize: 13,
     fontWeight: '800',
   },
@@ -1514,13 +1515,13 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   heroCardTitle: {
-    color: colors.text, // 먹색 볼드
-    fontSize: font.titleLarge + 4, // 엄청나게 큼
-    fontWeight: '900', // 토스처럼 무겁게
-    lineHeight: font.titleLarge + 12,
+    color: colors.text,
+    fontSize: font.titleLarge + 2, // 너무 과하지 않게 살짝 줄임
+    fontWeight: '800',
+    lineHeight: font.titleLarge + 10,
     marginTop: spacing.sm,
     marginBottom: spacing.sm,
-    letterSpacing: -0.5,
+    letterSpacing: -0.8, // 세련된 자간 조절
   },
   heroChipsRow: {
     flexDirection: 'row',
@@ -1544,27 +1545,28 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
 
-  /* 업로드 드롭존 - 옅은 회색 배경과 볼드 타이포, 선 없음 */
   dropzone: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.sm,
     backgroundColor: colors.surface,
     borderRadius: radius.card,
-    borderWidth: 0, // 테두리 없음
+    borderWidth: 1, // 얇고 정교한 선 복구
+    borderColor: 'rgba(0,0,0,0.04)',
     padding: spacing.lg,
     marginBottom: spacing.md,
+    ...theme.shadow.card, // 공간감을 주는 옅고 넓은 그림자
   },
   iconCircle: {
     width: 48,
     height: 48,
-    borderRadius: 8, // 원 대신 박스형
-    backgroundColor: '#EFF6FF',
+    borderRadius: radius.button, // 모던 곡률 적용
+    backgroundColor: colors.primarySoft,
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: spacing.sm,
     borderWidth: 1,
-    borderColor: '#DBEAFE',
+    borderColor: 'rgba(37, 99, 235, 0.1)',
   },
   dropzoneLogo: {
     width: 30,
@@ -1597,13 +1599,15 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
 
-  /* 샘플 체험 섹션 - 토스 스타일 둥근 배경 덩어리 */
+  /* 샘플 체험 섹션 - 프리미엄 카드 */
   sampleSection: {
-    backgroundColor: colors.surface, // 옅은 회색
-    borderWidth: 0, // 선 제거
+    backgroundColor: colors.surface,
+    borderColor: 'rgba(0,0,0,0.04)',
+    borderWidth: 1,
     borderRadius: radius.card,
     padding: spacing.lg,
     marginBottom: spacing.md,
+    ...theme.shadow.card,
   },
   sampleHeadTitle: {
     color: colors.text,
@@ -1722,46 +1726,49 @@ const styles = StyleSheet.create({
   },
 
   /* 연면적 입력 카드 */
-  /* 영상 촬영 (권장 동선) - 세련된 다크 박스 */
+  /* 영상 촬영 (권장 동선) - 프리미엄 화이트 카드 */
   videoCard: {
-    backgroundColor: '#000000', // 완전한 블랙으로 고급스러운 프리미엄 느낌
+    backgroundColor: colors.surface, // 다른 카드들과 동일한 화이트 배경
+    borderColor: 'rgba(0,0,0,0.04)',
+    borderWidth: 1,
     borderRadius: radius.card,
     padding: spacing.lg,
     marginTop: spacing.md,
+    ...theme.shadow.card, // 통일된 그림자
   },
   videoBadge: {
     alignSelf: 'flex-start',
-    backgroundColor: '#333333',
-    borderRadius: 4, // 박스형
-    paddingHorizontal: 8,
+    backgroundColor: colors.primarySoft,
+    borderRadius: radius.badge,
+    paddingHorizontal: 10,
     paddingVertical: 4,
-    marginBottom: 8,
+    marginBottom: spacing.sm,
     borderWidth: 1,
-    borderColor: '#555555',
+    borderColor: 'rgba(37, 99, 235, 0.1)',
   },
-  videoBadgeText: { color: '#FFFFFF', fontSize: 11, fontWeight: '700', letterSpacing: 1 },
-  videoTitle: { color: '#F8FAFC', fontSize: font.bodyLarge, fontWeight: '800' },
-  videoSub: { color: '#94A3B8', fontSize: 13, lineHeight: 19, marginTop: 4 },
+  videoBadgeText: { color: colors.primary, fontSize: 12, fontWeight: '700', letterSpacing: 0.5 },
+  videoTitle: { color: colors.text, fontSize: font.bodyLarge, fontWeight: '800' },
+  videoSub: { color: colors.textMuted, fontSize: 13, lineHeight: 19, marginTop: 4 },
   videoCta: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     gap: 8,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: colors.primary, // 프리미엄 블루 액션 버튼
     borderRadius: radius.button,
     paddingVertical: 14,
     marginTop: spacing.md,
   },
-  videoCtaText: { color: '#000000', fontSize: 15, fontWeight: '700' },
+  videoCtaText: { color: '#FFFFFF', fontSize: 15, fontWeight: '700' },
 
-  /* 현장 주소(지도 선택) */
   addrCard: {
-    backgroundColor: colors.background,
-    borderColor: colors.border,
+    backgroundColor: colors.surface, // 순백색 배경
+    borderColor: 'rgba(0,0,0,0.04)',
     borderWidth: 1,
     borderRadius: radius.card,
     padding: spacing.md,
     marginTop: spacing.md,
+    ...theme.shadow.card,
   },
   addrHead: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   addrTitle: { color: colors.text, fontSize: font.bodyLarge, fontWeight: '800' },
@@ -1797,12 +1804,13 @@ const styles = StyleSheet.create({
   addrBtnText: { color: colors.primary, fontSize: 14, fontWeight: '800' },
 
   areaCard: {
-    backgroundColor: colors.background,
-    borderColor: colors.border,
+    backgroundColor: colors.surface,
+    borderColor: 'rgba(0,0,0,0.04)',
     borderWidth: 1,
     borderRadius: radius.card,
     padding: spacing.md,
     marginTop: spacing.md,
+    ...theme.shadow.card,
   },
   areaTitle: { color: colors.text, fontSize: font.bodyLarge, fontWeight: '800' },
   areaSub: { color: colors.textMuted, fontSize: 13, marginTop: 4 },
@@ -1856,19 +1864,21 @@ const styles = StyleSheet.create({
   /* 물량 추정 결과 카드 */
   /* 금액 견적 */
   costCard: {
-    backgroundColor: '#111827',
+    backgroundColor: '#0F172A', // Slate 900
     borderRadius: radius.card,
     padding: spacing.md,
     marginTop: spacing.xs,
     marginBottom: spacing.xs,
+    ...theme.shadow.floating, // 깊은 공간감
+    shadowOpacity: 0.1,
   },
   costHead: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   costTitle: { color: '#F8FAFC', fontSize: font.body, fontWeight: '800', flex: 1 },
   costVatChip: {
     backgroundColor: 'rgba(255,255,255,0.12)',
-    borderRadius: 999,
-    paddingHorizontal: 10,
-    paddingVertical: 3,
+    borderRadius: radius.badge,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
   },
   costVatText: { color: '#A7F3D0', fontSize: 11, fontWeight: '700' },
   costHero: {
@@ -2155,28 +2165,33 @@ const styles = StyleSheet.create({
   },
   actionCard: {
     flex: 1,
-    backgroundColor: '#000000', // 모노크롬 다크
-    borderRadius: 4, // 아주 각진 박스
+    backgroundColor: colors.surface, // 깨끗한 화이트
+    borderColor: 'rgba(0,0,0,0.04)',
+    borderWidth: 1,
+    borderRadius: radius.card, // 세련된 모던 곡률
     padding: spacing.md,
     alignItems: 'center',
     justifyContent: 'center',
+    ...theme.shadow.card,
   },
   actionIconCircle: {
     width: 48,
     height: 48,
-    borderRadius: 4, // 아이콘 배경도 원 대신 각진 박스로
-    backgroundColor: '#333333',
+    borderRadius: 24, // 원형이 아이콘과 어울림
+    backgroundColor: colors.background, // 배경과 섞이게
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: spacing.xs,
+    borderWidth: 1,
+    borderColor: 'rgba(0,0,0,0.02)',
   },
   actionCardTitle: {
-    color: '#FFFFFF',
+    color: colors.text,
     fontSize: font.bodyLarge,
-    fontWeight: '700',
+    fontWeight: '800',
   },
   actionCardSub: {
-    color: '#A0A0A0',
+    color: colors.textMuted,
     fontSize: 13,
     marginTop: 4,
   },

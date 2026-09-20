@@ -328,12 +328,13 @@ const styles = StyleSheet.create({
     fontWeight: '800', // 토스처럼 훨씬 굵게
   },
   card: {
-    backgroundColor: colors.background, // 카드 배경은 흰색 (또는 서페이스에 따라)
+    backgroundColor: colors.surface, // 카드는 순백색으로 배경(F8FAFC)과 분리
+    borderColor: 'rgba(0,0,0,0.04)', // 아주 옅은 실선 테두리
     borderRadius: radius.card,
-    borderWidth: 0, // 보더 완전 제거
-    marginBottom: spacing.md, // 카드 간격 더 넓게
+    borderWidth: 1, 
+    marginBottom: spacing.md, 
     padding: spacing.lg,
-    // 그림자 제거, 플랫한 디자인
+    ...theme.shadow.card, // 공간감을 주는 옅고 넓은 그림자
   },
   badge: {
     alignSelf: 'flex-start',
@@ -352,18 +353,21 @@ const styles = StyleSheet.create({
     marginBottom: spacing.xs,
   },
   fieldInput: {
-    backgroundColor: colors.surface, // 토스 스타일의 옅은 회색 배경
+    backgroundColor: colors.surface, // 입력창은 깨끗한 흰색
+    borderColor: colors.border,
     borderRadius: radius.button,
-    borderWidth: 0, // 보더 완전 제거
+    borderWidth: 1, // 얇고 정교한 1px 보더
     color: colors.text,
     fontSize: font.bodyLarge,
     minHeight: touch.primaryButtonHeight,
     paddingHorizontal: spacing.md,
   },
   fieldInputFocused: {
-    backgroundColor: colors.surface, // 포커스 시 배경색 유지 (경우에 따라 약간 어둡게 하기도 함)
-    borderWidth: 0,
-    // 토스는 포커스 상태를 굳이 강하게 주지 않거나 보더만 살짝 줌. 여기서는 심플하게 유지.
+    backgroundColor: colors.surface,
+    borderColor: colors.primary, // 포커스 시 브랜드 컬러
+    borderWidth: 1.5,
+    ...theme.shadow.floating, // 포커스 시 살짝 떠오르는 깊이감
+    shadowOpacity: 0.04,
   },
   fieldHint: {
     color: colors.textMuted,
@@ -390,7 +394,8 @@ const styles = StyleSheet.create({
     alignSelf: 'center',
   },
   infoRow: {
-    borderBottomWidth: 0, // 경계선 제거
+    borderBottomColor: colors.border,
+    borderBottomWidth: 1, // 정교한 디바이더 선
     flexDirection: 'row',
     justifyContent: 'space-between',
     paddingVertical: spacing.sm,

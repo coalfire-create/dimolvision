@@ -384,6 +384,24 @@ export function createSiteAnalysisRouter(
   });
 
   /**
+   * GET /api/recon/warmup
+   *
+   * GPU 컨테이너를 미리 깨운다. 유휴 상태에서 0 으로 축소되므로 첫 요청은 콜드스타트
+   * 52초(실측)를 그대로 기다린다. 사용자가 촬영을 시작하는 순간 깨워 두면 촬영에
+   * 20~60초가 걸리는 사이에 준비가 끝나 그 대기가 사라진다.
+   *
+   * 응답을 기다리지 않는다 — 깨우는 게 목적이지 결과가 필요한 게 아니다.
+   */
+  router.get('/recon/warmup', (_req, res) => {
+    if (!recon) {
+      res.status(503).json({ ok: false });
+      return;
+    }
+    void recon.warmup();
+    res.json({ ok: true });
+  });
+
+  /**
    * GET /api/geo/parcel?lat=&lng=
    * 지도에서 찍은 좌표를 건축물대장 조회용 지번 코드로 옮긴다.
    */

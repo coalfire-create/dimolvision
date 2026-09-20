@@ -116,6 +116,23 @@ export interface ReconstructionConfig {
 export class ReconstructionClient {
   constructor(private readonly config: ReconstructionConfig) {}
 
+  /**
+   * GPU 컨테이너를 깨운다. 실패해도 무시한다 — 못 깨우면 원래대로 첫 요청이
+   * 콜드스타트를 겪을 뿐, 복원 자체가 막히지는 않는다.
+   */
+  async warmup(): Promise<void> {
+    try {
+      const controller = new AbortController();
+      setTimeout(() => controller.abort(), 90_000);
+      await fetch(`${this.config.baseUrl.replace(/\/$/, '')}/health`, {
+        signal: controller.signal,
+        ...(this.config.apiKey ? { headers: { authorization: `Bearer ${this.config.apiKey}` } } : {}),
+      });
+    } catch {
+      // 깨우기는 최선 노력이다.
+    }
+  }
+
   async reconstruct(frames: string[]): Promise<ReconstructionResponse> {
     const use = frames.slice(0, MAX_RECON_FRAMES);
     if (use.length < MIN_RECON_FRAMES) {

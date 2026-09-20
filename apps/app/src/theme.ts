@@ -11,34 +11,34 @@ export const theme = {
   spacing: SPACING,
   touch: TOUCH,
   radius: {
-    card: 12, // 밤티(둥근) 느낌 제거, 각진 세련미
-    button: 8, // 버튼도 둥근 모서리 대신 각지게
-    badge: 4,
-    pill: 4,
+    card: 16, // 모던하고 우아한 네이티브 곡률
+    button: 12,
+    badge: 6,
+    pill: 999, // 완전한 원형이 필요한 경우를 위해
   },
-  /** 그림자 프리셋 — 토스 스타일은 그림자를 거의 쓰지 않으나, 팝업 등에 아주 은은하게 사용 */
+  /** 그림자 프리셋 — 하이엔드 앱 스타일의 깊고 넓게 퍼지는 아주 옅은 그림자 */
   shadow: {
-    /** 카드·시트 기본 그림자 - 토스는 배경색으로 면을 구분하므로 그림자를 극단적으로 줄임 */
+    /** 카드·시트 기본 그림자. 어둡지 않고 공간감만 부여 */
     card: {
-      shadowColor: '#000000',
-      shadowOpacity: 0.02,
-      shadowRadius: 10,
-      shadowOffset: { width: 0, height: 4 },
-      elevation: 1, // Android
+      shadowColor: '#0F172A',
+      shadowOpacity: 0.03,
+      shadowRadius: 24,
+      shadowOffset: { width: 0, height: 8 },
+      elevation: 4, // Android
     },
-    /** 주요 버튼 강조 그림자(브랜드 색) - 토스 버튼은 그림자 없는 경우가 많으므로 최소화 */
+    /** 주요 버튼/강조 요소 그림자 */
     primary: {
       shadowColor: COLORS.primary,
-      shadowOpacity: 0.1,
-      shadowRadius: 12,
+      shadowOpacity: 0.15,
+      shadowRadius: 16,
       shadowOffset: { width: 0, height: 6 },
-      elevation: 3,
+      elevation: 4,
     },
-    /** 글래스모피즘/모달용 그림자 - 팝업 시에만 명확하게 떨어지도록 */
+    /** 팝업, 플로팅 등 깊이가 깊은 그림자 */
     floating: {
-      shadowColor: '#000000',
-      shadowOpacity: 0.08,
-      shadowRadius: 40,
+      shadowColor: '#0F172A',
+      shadowOpacity: 0.06,
+      shadowRadius: 32,
       shadowOffset: { width: 0, height: 16 },
       elevation: 8,
     }

@@ -26,6 +26,9 @@ RUN for i in 1 2 3; do \
       echo "재시도 $i"; sleep 15; \
     done
 
+# Poisson 표면 재구성용. 점군을 삼각형 면으로 바꿔야 "벽" 으로 보인다.
+RUN pip install --no-cache-dir open3d==0.18.0
+
 COPY server.py /app/server.py
 ENV PORT=8080
 CMD ["python", "/app/server.py"]

@@ -48,6 +48,9 @@ MAX_POINTS = 150000
 # 신뢰도 하위 구간은 버린다. 하늘·유리처럼 깊이를 못 정한 화소가 형상을 망친다.
 CONF_PERCENTILE = 50.0
 
+# 메시로 바꿀 때 쓰는 점 개수. 전부 넣으면 Poisson 이 수 분 걸린다.
+MESH_SAMPLE = 120000
+
 _model = None
 _device = "cuda" if torch.cuda.is_available() else "cpu"
 _dtype = torch.bfloat16 if (
@@ -84,6 +87,66 @@ def robust_extent(pts: np.ndarray) -> dict:
         "z": float(d[2]),
         "diagonal": float(np.linalg.norm(d)),
     }
+
+
+def build_mesh(pts: np.ndarray, rgb: np.ndarray) -> dict | None:
+    """
+    점군 → 삼각형 면(메시).
+
+    점을 크게 찍어 겹치게 하면 멀리서는 벽처럼 보이지만 가까이 가면 다시 점이다.
+    진짜 면을 만들려면 법선을 추정하고 표면을 맞춰야 한다. Poisson 재구성은
+    닫힌 매끄러운 표면을 만들어 주는데, 밀도가 낮은 곳까지 억지로 메우므로
+    그런 부분은 잘라낸다 — 안 그러면 없는 벽이 생긴다.
+    """
+    try:
+        import open3d as o3d
+    except Exception:
+        return None
+    if len(pts) < 5000:
+        return None
+    try:
+        idx = (np.linspace(0, len(pts) - 1, MESH_SAMPLE).astype(int)
+               if len(pts) > MESH_SAMPLE else np.arange(len(pts)))
+        pc = o3d.geometry.PointCloud()
+        pc.points = o3d.utility.Vector3dVector(pts[idx].astype(np.float64))
+        if rgb is not None and rgb.shape[0] == pts.shape[0]:
+            pc.colors = o3d.utility.Vector3dVector((rgb[idx] / 255.0).astype(np.float64))
+
+        # 이상치를 먼저 뺀다. 튄 점이 남으면 표면이 그쪽으로 끌려간다.
+        pc, _ = pc.remove_statistical_outlier(nb_neighbors=20, std_ratio=2.0)
+        pc.estimate_normals(o3d.geometry.KDTreeSearchParamKNN(knn=30))
+        pc.orient_normals_consistent_tangent_plane(30)
+
+        mesh, dens = o3d.geometry.TriangleMesh.create_from_point_cloud_poisson(
+            pc, depth=9, linear_fit=True
+        )
+        # 점이 거의 없던 곳에 생긴 면은 지운다(하위 6%).
+        d = np.asarray(dens)
+        if d.size:
+            mesh.remove_vertices_by_mask(d < np.quantile(d, 0.06))
+        mesh.remove_degenerate_triangles()
+        mesh.remove_duplicated_vertices()
+        mesh = mesh.simplify_quadric_decimation(150000)
+        mesh.compute_vertex_normals()
+
+        v = np.asarray(mesh.vertices, dtype=np.float32)
+        f = np.asarray(mesh.triangles, dtype=np.uint32)
+        if len(v) < 100 or len(f) < 100:
+            return None
+        vc = np.asarray(mesh.vertex_colors)
+        return {
+            "verticesB64": base64.b64encode(v.tobytes()).decode(),
+            "facesB64": base64.b64encode(f.tobytes()).decode(),
+            "vertexColorsB64": (
+                base64.b64encode((vc * 255).astype(np.uint8).tobytes()).decode()
+                if vc.size else None
+            ),
+            "vertexCount": int(len(v)),
+            "faceCount": int(len(f)),
+        }
+    except Exception:
+        # 메시는 덤이다. 실패해도 점군은 그대로 보여 준다.
+        return None
 
 
 def reconstruct(img_dir: str) -> dict:
@@ -148,6 +211,8 @@ def reconstruct(img_dir: str) -> dict:
     for e in extrinsic:
         R, t = e[:3, :3], e[:3, 3]
         cams.append((-R.T @ t).tolist())
+    mesh = build_mesh(pts, rgb if rgb.shape[0] == pts.shape[0] else None)
+
     cams_np = np.array(cams, dtype=np.float64)
     path_len = (
         float(np.sum(np.linalg.norm(np.diff(cams_np, axis=0), axis=1)))
@@ -178,6 +243,8 @@ def reconstruct(img_dir: str) -> dict:
         "registeredNames": [os.path.basename(p) for p in used],
         "modelCount": 1,
         "profile": "vggt",
+        # 삼각형 면. 있으면 화면이 점 대신 이걸 그려 진짜 벽으로 보인다.
+        **({"mesh": mesh} if mesh else {}),
         "elapsedSec": round(time.time() - started, 1),
     }
 

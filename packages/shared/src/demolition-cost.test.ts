@@ -5,6 +5,7 @@ import {
   LABOR_WON_PER_DAY,
   TREATMENT_WON_PER_TON,
   equipmentDailyWon,
+  detectRisks,
   estimateDemolitionCost,
   formatWonShort,
   matchEquipment,
@@ -267,5 +268,66 @@ describe('수집·운반비 분류', () => {
     const treat = r.lines.find((l) => l.key === 'TREATMENT')!;
     expect(treat.detail[0]).toContain('분리하면');
     expect(treat.detail[0]).toContain('절감');
+  });
+});
+
+describe('현장 조건 할증 — 특이사항이 금액에 반영된다', () => {
+  const base = {
+    wasteByClass: [{ wasteClass: 'CONCRETE' as const, estimatedKg: 100_000, separable: true }],
+    workDays: 6,
+    crewSize: 4,
+    equipment: [{ name: '굴착기', spec: '0.6㎥' }],
+  };
+  const of = (r: ReturnType<typeof estimateDemolitionCost>, k: string) =>
+    r.lines.find((l) => l.key === k);
+
+  it('야간작업이면 노무비의 50% 를 가산한다 — 근로기준법 제56조', () => {
+    const r = estimateDemolitionCost({ ...base, risks: { nightWork: true } });
+    const night = of(r, 'NIGHT')!;
+    const labor = of(r, 'LABOR')!;
+    expect(night.minWon).toBe(Math.round((labor.minWon * 0.5) / 1000) * 1000);
+    expect(night.detail.join(' ')).toContain('근로기준법');
+  });
+
+  it('장비 진입이 어려우면 장비비를 할증한다', () => {
+    const r = estimateDemolitionCost({ ...base, risks: { hardAccess: true } });
+    expect(of(r, 'ACCESS')).toBeDefined();
+    // 조건이 없으면 할증도 없다.
+    expect(of(estimateDemolitionCost(base), 'ACCESS')).toBeUndefined();
+  });
+
+  it('조건이 없으면 총액이 늘지 않는다 — 없는 위험을 만들지 않는다', () => {
+    const plain = estimateDemolitionCost(base);
+    const risky = estimateDemolitionCost({ ...base, risks: {} });
+    expect(risky.totalMaxWon).toBe(plain.totalMaxWon);
+  });
+
+  it('할증은 간접비·부가세에도 반영된다 — 직접비가 늘면 전부 따라 는다', () => {
+    const plain = estimateDemolitionCost(base);
+    const night = estimateDemolitionCost({ ...base, risks: { nightWork: true } });
+    expect(night.totalMaxWon).toBeGreaterThan(plain.totalMaxWon);
+    expect(of(night, 'PROFIT')!.maxWon).toBeGreaterThan(of(plain, 'PROFIT')!.maxWon);
+  });
+
+  it('석면은 금액에 넣지 않되 규모를 숫자로 적는다', () => {
+    const r = estimateDemolitionCost({ ...base, hasAsbestos: true });
+    const ex = r.excluded[0];
+    // "별도" 라고만 쓰면 얼마인지 몰라 예산을 못 잡는다.
+    expect(ex).toContain('석면해체공');
+    expect(ex).toMatch(/\d{1,3}(,\d{3})*원/);
+  });
+});
+
+describe('detectRisks — 특이사항 문장에서 조건을 읽는다', () => {
+  it('석면·야간·진입곤란·수작업을 잡아낸다', () => {
+    expect(detectRisks(['천장 텍스 석면 의심']).asbestos).toBe(true);
+    expect(detectRisks(['야간작업으로 진행']).nightWork).toBe(true);
+    expect(detectRisks(['골목이 좁아 장비 진입 곤란']).hardAccess).toBe(true);
+    expect(detectRisks(['마감재가 혼재되어 수작업 분리 필요']).handSorting).toBe(true);
+  });
+
+  it('해당 없는 문장에서는 아무 조건도 만들지 않는다', () => {
+    const r = detectRisks(['콘크리트 벽체가 보입니다', '바닥은 타일입니다']);
+    expect(Object.values(r).some(Boolean)).toBe(false);
   });
 });

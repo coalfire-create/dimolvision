@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import {
+  detectRisks,
   estimateDemolitionCost,
   reconcileWasteByClass,
   siteAnalysisToWasteItems,
@@ -241,6 +242,16 @@ export function createSiteAnalysisRouter(
     const hasAsbestos =
       analysis.materials.some((m) => m.hazardous) ||
       analysis.hazards.some((h) => h.includes('석면'));
+
+    // 특이사항·위험요소·단가요인을 모두 읽어 현장 조건을 잡는다. 글로만 적혀 있던
+    // 것들이 여기서 금액이 된다 — 야간작업은 노무비 50% 가산(근로기준법 제56조),
+    // 장비 진입 곤란은 장비비 할증, 수작업 분리는 인건비 할증.
+    const riskTexts = [
+      ...analysis.hazards,
+      ...(basis?.costDrivers ?? []),
+      ...(analysis.findings ?? []).flatMap((f) => [f.title, f.observed, f.why, f.caution]),
+    ];
+    const risks = detectRisks(riskTexts);
     const distanceKm =
       typeof body.distanceKm === 'number' && body.distanceKm > 0 ? body.distanceKm : undefined;
 
@@ -254,6 +265,7 @@ export function createSiteAnalysisRouter(
       ...(basis?.estimatedCrewSize ? { crewSize: basis.estimatedCrewSize } : {}),
       ...(basis?.equipment ? { equipment: basis.equipment } : {}),
       hasAsbestos,
+      risks,
       ...(distanceKm ? { distanceKm } : {}),
     });
   }

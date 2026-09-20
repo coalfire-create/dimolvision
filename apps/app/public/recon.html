@@ -941,6 +941,59 @@ let CAPTURE_QUALITY = 0.58;
       }
 
       /**
+       * 삼각형 면을 장면에 올린다.
+       *
+       * 면은 빛을 받아야 굴곡이 보인다. 점군은 색만 있으면 되지만 메시는 조명이
+       * 없으면 실루엣만 보인다 — 그래서 조명을 함께 넣는다.
+       * 실패하면 false 를 돌려 호출부가 점군으로 돌아가게 한다.
+       */
+      function addMesh(mesh, center) {
+        try {
+          const v = new Float32Array(b64ToBytes(mesh.verticesB64).buffer);
+          const f = new Uint32Array(b64ToBytes(mesh.facesB64).buffer);
+          if (v.length < 300 || f.length < 300) return false;
+
+          const pos = new Float32Array(v.length);
+          for (let i = 0; i < v.length; i += 3) {
+            pos[i] = v[i] - center[0];
+            pos[i + 1] = v[i + 1] - center[1];
+            pos[i + 2] = v[i + 2] - center[2];
+          }
+          const g = new THREE.BufferGeometry();
+          g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+          g.setIndex(new THREE.BufferAttribute(f, 1));
+
+          if (mesh.vertexColorsB64) {
+            const c8 = b64ToBytes(mesh.vertexColorsB64);
+            const cf = new Float32Array(c8.length);
+            // 실내는 어둡다. 점군과 같은 감마 보정을 써서 형상이 읽히게 한다.
+            for (let i = 0; i < c8.length; i++) cf[i] = Math.min(1, Math.pow(c8[i] / 255, 0.65) * 1.1);
+            g.setAttribute('color', new THREE.BufferAttribute(cf, 3));
+          }
+          g.computeVertexNormals();
+
+          const mat = new THREE.MeshStandardMaterial({
+            ...(mesh.vertexColorsB64 ? { vertexColors: true } : { color: 0xcbd5e1 }),
+            roughness: 0.95,
+            metalness: 0.0,
+            // 안쪽에서 보는 방이라 뒷면도 그려야 벽이 뚫려 보이지 않는다.
+            side: THREE.DoubleSide,
+            flatShading: false,
+          });
+          cloud = new THREE.Mesh(g, mat);
+          scene.add(cloud);
+
+          scene.add(new THREE.HemisphereLight(0xffffff, 0x334155, 2.2));
+          const dir = new THREE.DirectionalLight(0xffffff, 1.0);
+          dir.position.set(1, 2, 1);
+          scene.add(dir);
+          return true;
+        } catch {
+          return false;
+        }
+      }
+
+      /**
        * 점을 원으로 찍기 위한 텍스처.
        * 기본 점은 사각형이라 조밀해지면 격자 무늬가 생겨 면처럼 보이지 않는다.
        */
@@ -969,7 +1022,7 @@ let CAPTURE_QUALITY = 0.58;
 
       // ── 3D 뷰어 ────────────────────────────────────────────────────
       let renderer, scene, camera, cloud, raf;
-      function renderCloud(points, cameras, colors) {
+      function renderCloud(points, cameras, colors, mesh) {
         const host = document.getElementById('viewer');
         host.innerHTML = '';
         const w = host.clientWidth, h = host.clientHeight;
@@ -1036,16 +1089,21 @@ let CAPTURE_QUALITY = 0.58;
         const spacing = Math.cbrt(vol / Math.max(1, k));
         const pointSize = Math.min(maxR / 25, Math.max(maxR / 300, spacing * 2.8));
 
-        cloud = new THREE.Points(geo, new THREE.PointsMaterial({
-          ...(col ? { vertexColors: true } : { color: 0x93c5fd }),
-          size: pointSize,
-          sizeAttenuation: true,
-          // 점을 사각형이 아니라 원으로 그려 면이 매끈해 보이게 한다.
-          map: discTexture(),
-          alphaTest: 0.5,
-          transparent: false,
-        }));
-        scene.add(cloud);
+        // 메시가 있으면 면을 그린다. 점을 크게 찍어 겹치게 하면 멀리서만 벽처럼
+        // 보이고 가까이 가면 다시 점이다. 삼각형 면이라야 진짜 벽이다.
+        const built = mesh && addMesh(mesh, c);
+        if (!built) {
+          cloud = new THREE.Points(geo, new THREE.PointsMaterial({
+            ...(col ? { vertexColors: true } : { color: 0x93c5fd }),
+            size: pointSize,
+            sizeAttenuation: true,
+            // 점을 사각형이 아니라 원으로 그려 면이 매끈해 보이게 한다.
+            map: discTexture(),
+            alphaTest: 0.5,
+            transparent: false,
+          }));
+          scene.add(cloud);
+        }
 
         // 촬영 동선 — 어디를 돌며 찍었는지 보이면 빠진 구간을 알 수 있다.
         if (cameras && cameras.length > 1) {
@@ -1703,9 +1761,12 @@ let CAPTURE_QUALITY = 0.58;
 
           $('result').classList.remove('hidden');
           const q = data.quality || {};
+          const meshNote = data.mesh
+            ? ` · 면 ${data.mesh.faceCount.toLocaleString()}개로 재구성`
+            : '';
           $('quality').textContent =
             `${data.registeredImages}/${data.totalImages}장 정합 · 점 ${data.pointCount.toLocaleString()}개 · ` +
-            `${data.elapsedSec}초 소요` + (q.advice ? ` — ${q.advice}` : '');
+            `${data.elapsedSec}초 소요${meshNote}` + (q.advice ? ` — ${q.advice}` : '');
 
           // 좌표·색은 base64 바이너리로 온다(같은 용량에 7배 많은 점).
           // 구형 응답은 points 배열만 있으므로 그때는 그걸 평탄화해 쓴다.
@@ -1713,7 +1774,7 @@ let CAPTURE_QUALITY = 0.58;
             ? new Float32Array(b64ToBytes(data.pointsB64).buffer)
             : Float32Array.from((data.points || []).flat());
           const rgb = data.colorsB64 ? b64ToBytes(data.colorsB64) : null;
-          renderCloud(xyz, data.cameras, rgb);
+          renderCloud(xyz, data.cameras, rgb, data.mesh);
           showMissing(data.missingSegments);
 
           // 복원 좌표계의 크기. 여기서부터는 서버를 다시 부르지 않고 화면에서 환산한다.

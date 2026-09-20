@@ -296,9 +296,50 @@ export const OVERHEAD_RATES = {
   vat: 0.1,
 } as const;
 
+/**
+ * 현장 조건에 따른 할증.
+ *
+ * 특이사항을 글로만 적어 두면 견적에 반영되지 않는다. 석면이 있으면 인력이 바뀌고,
+ * 야간에 하면 노임이 오르고, 장비가 못 들어가면 사람 손이 더 든다 — 실제 견적서는
+ * 이걸 금액으로 적는다.
+ *
+ * 다만 여기서도 규칙은 같다: **공표된 근거가 있는 것만 금액으로 만든다.**
+ * 근거가 없는 것(석면 조사비, 인허가 수수료)은 금액 대신 제외 항목으로 남긴다.
+ */
+export interface RiskInput {
+  /** 석면 의심이 있는가. */
+  asbestos?: boolean;
+  /** 야간·휴일 작업인가. */
+  nightWork?: boolean;
+  /** 장비 진입이 어려운가(좁은 골목·지하·상층부). */
+  hardAccess?: boolean;
+  /** 마감재가 뒤섞여 수작업 분리 비중이 큰가. */
+  handSorting?: boolean;
+}
+
+/**
+ * 특이사항 문장에서 현장 조건을 읽는다.
+ *
+ * AI 가 내는 문장은 자유 형식이라 구조화된 값이 없다. 그렇다고 사람이 매번 체크박스를
+ * 누르게 할 수도 없다. 견적을 바꾸는 조건은 종류가 정해져 있으므로 낱말로 잡아낸다.
+ * 놓치면 할증이 빠질 뿐 잘못된 금액이 나오지는 않는다 — 한쪽으로만 틀리게 설계했다.
+ */
+export function detectRisks(texts: readonly string[]): RiskInput {
+  const all = texts.join(' ');
+  return {
+    asbestos: /석면|슬레이트|텍스|뿜칠|내화피복/.test(all),
+    nightWork: /야간|심야|주말|휴일|야간작업/.test(all),
+    hardAccess: /진입|접근|골목|협소|좁은|양중|크레인|고소|지하층|이면도로/.test(all),
+    handSorting: /수작업|분리\s*해체|혼재|뒤섞|선별/.test(all),
+  };
+}
+
 /** 금액 한 줄. min/max 는 분리배출 성패·차종 차이에서 오는 실제 폭이다. */
 export interface CostLine {
-  key: 'TREATMENT' | 'TRANSPORT' | 'LABOR' | 'EQUIPMENT' | 'SAFETY' | 'GENERAL' | 'PROFIT';
+  key:
+    | 'TREATMENT' | 'TRANSPORT' | 'LABOR' | 'EQUIPMENT'
+    | 'NIGHT' | 'ACCESS' | 'HANDWORK'
+    | 'SAFETY' | 'GENERAL' | 'PROFIT';
   label: string;
   minWon: number;
   maxWon: number;
@@ -338,6 +379,8 @@ export interface CostEstimateInput {
   hasAsbestos?: boolean;
   /** 처리장까지 거리(km). 기본 30km. */
   distanceKm?: number;
+  /** 현장 조건 할증. 특이사항에서 읽어 넣는다. */
+  risks?: RiskInput;
 }
 
 /**
@@ -567,7 +610,64 @@ export function estimateDemolitionCost(input: CostEstimateInput): CostEstimate {
     });
   }
 
-  // ── 5. 간접비 ───────────────────────────────────────────────────────────
+  // ── 5. 현장 조건 할증 ───────────────────────────────────────────────────
+  // 특이사항을 글로만 적으면 견적에 반영되지 않는다. 금액으로 옮기되,
+  // 공표 근거가 있는 것만 더한다.
+  const risk = input.risks ?? {};
+  const laborLine = lines.find((l) => l.key === 'LABOR');
+  const equipLine = lines.find((l) => l.key === 'EQUIPMENT');
+
+  if (risk.nightWork && laborLine) {
+    // 근로기준법 제56조 — 야간(22시~06시)·휴일 근로는 통상임금의 50% 이상 가산.
+    // 법으로 정해진 비율이라 추정이 아니다.
+    lines.push({
+      key: 'NIGHT',
+      label: '야간·휴일 근로 가산',
+      minWon: round1000(laborLine.minWon * 0.5),
+      maxWon: round1000(laborLine.maxWon * 0.5),
+      detail: [
+        `직접노무비 × 50%`,
+        '근로기준법 제56조 — 야간(22~06시)·휴일 근로는 통상임금의 50% 이상 가산',
+      ],
+      source: PRICE_SOURCES.labor,
+    });
+  }
+
+  if (risk.hardAccess && equipLine) {
+    // 장비가 못 들어가면 소형 장비로 바꾸고 가동일이 늘어난다. 실무에서 흔한 30% 를
+    // 쓰되 근거를 함께 적어 발주자가 자기 현장 기준으로 고칠 수 있게 한다.
+    lines.push({
+      key: 'ACCESS',
+      label: '장비 진입 곤란 할증',
+      minWon: round1000(equipLine.minWon * 0.3),
+      maxWon: round1000(equipLine.maxWon * 0.3),
+      detail: [
+        '장비비 × 30%',
+        '진입로가 좁아 소형 장비로 대체하거나 양중이 필요한 경우의 가동일 증가분',
+        '실제 폭은 현장 실사로 확정해야 한다',
+      ],
+      source: PRICE_SOURCES.equipment,
+    });
+  }
+
+  if (risk.handSorting && laborLine) {
+    // 마감재가 뒤섞이면 사람이 골라내야 한다. 인건비가 늘고, 대신 분리배출이 되어
+    // 처리비는 내려간다 — 그래서 처리비 하한이 이미 그 이득을 반영하고 있다.
+    lines.push({
+      key: 'HANDWORK',
+      label: '수작업 분리 할증',
+      minWon: round1000(laborLine.minWon * 0.2),
+      maxWon: round1000(laborLine.maxWon * 0.35),
+      detail: [
+        '직접노무비 × 20~35%',
+        '마감재가 뒤섞여 기계로 밀지 못하고 사람이 골라내야 하는 구간',
+        '대신 분리배출이 되어 처리비는 내려간다(처리비 하한에 이미 반영)',
+      ],
+      source: PRICE_SOURCES.labor,
+    });
+  }
+
+  // ── 6. 간접비 ───────────────────────────────────────────────────────────
   const directMin = lines.reduce((s, l) => s + l.minWon, 0);
   const directMax = lines.reduce((s, l) => s + l.maxWon, 0);
 
@@ -621,14 +721,25 @@ export function estimateDemolitionCost(input: CostEstimateInput): CostEstimate {
     '지장물·지중구조물·정화조 처리비',
     '폐기물처분부담금 및 최종처분(매립) 반입료',
   ];
-  if (input.hasAsbestos) {
-    excluded.unshift('석면조사비(석면안전관리법상 해체 전 의무) 및 석면해체·제거 공사비');
+  if (input.hasAsbestos || risk.asbestos) {
+    // 석면은 등록업체가 별도 계약으로 한다. 금액을 합계에 넣으면 이 견적으로
+    // 계약할 수 있다는 오해를 준다. 대신 **규모를 숫자로** 적어 발주자가 예산을
+    // 잡을 수 있게 한다 — "별도" 라고만 쓰면 얼마인지 몰라 준비를 못 한다.
+    const dayRate = LABOR_WON_PER_DAY.석면해체공;
+    const lo = dayRate * 2 * 2; // 2명 × 2일
+    const hi = dayRate * 4 * 5; // 4명 × 5일
+    excluded.unshift(
+      `석면조사비(석면안전관리법상 해체 전 의무 — 기관 견적) 및 석면해체·제거 공사비 ` +
+        `— 석면해체공 ${won(dayRate)}/일 기준 ${won(lo)}~${won(hi)} 규모(2~4명 × 2~5일). ` +
+        `폐석면 처리비 ${won(TREATMENT_WON_PER_TON.DESIGNATED.min)}/톤은 위 처리비에 포함됨`,
+    );
   }
 
   const assumptions = [
+    ...(risk.nightWork ? [] : ['주간작업 기준 — 야간·휴일 작업이면 노무비가 50% 가산된다']),
+    ...(risk.hardAccess ? [] : ['장비가 현장까지 진입 가능한 것으로 본다']),
     `운반거리 ${distKm}km, 처리장 반입 기준`,
-    '1일 8시간, 주간작업 기준(야간·휴일 할증 미반영)',
-    '장비 진입로가 확보되어 기계 철거가 가능한 현장 기준',
+    '1일 8시간 기준',
     '폐기물 물량은 사진·연면적 기반 추정치 — 실제 계량 중량으로 정산해야 한다',
   ];
 

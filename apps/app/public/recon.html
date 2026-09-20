@@ -1196,8 +1196,28 @@ let CAPTURE_QUALITY = 0.58;
           for (let i = 1; i < B; i++) if (hist[i] > hist[peak]) peak = i;
           return ((peak + 0.5) / B) * 2 * Math.PI - Math.PI;
         })();
-        // 카메라는 -dir 쪽을 본다. 그 방위를 정면에 두려면 ry = 방위 + π.
-        let rx = 0.0, ry = startAzimuth + Math.PI, dragging = false, lx = 0, ly = 0;
+        // 올려다볼지 내려다볼지도 데이터가 정한다.
+        //
+        // 사람은 휴대폰을 조금 내려 들고 찍는다. 그래서 천장은 복원되지 않고 바닥과
+        // 벽 아랫부분만 남는다. 그 상태에서 수평으로 보면 화면 위 절반이 텅 빈다.
+        // 정면에 있는 점들의 평균 고도각만큼 시선을 기울여, 복원된 것이 화면
+        // 한가운데 오게 한다.
+        const startPitch = (() => {
+          const sa = Math.sin(startAzimuth), ca = Math.cos(startAzimuth);
+          let sum = 0, cnt = 0;
+          for (let i = 0; i < k; i++) {
+            const dx = pos[i * 3] - pivot0[0], dy = pos[i * 3 + 1] - pivot0[1],
+                  dz = pos[i * 3 + 2] - pivot0[2];
+            const r = Math.hypot(dx, dz);
+            if (r < 1e-6) continue;
+            if ((dx * sa + dz * ca) / r < 0.5) continue;   // 정면 60° 안쪽만
+            sum += Math.atan2(dy, r); cnt++;
+          }
+          return cnt ? Math.max(-0.7, Math.min(0.7, sum / cnt)) : 0;
+        })();
+        // 카메라는 -dir 쪽을 본다. 그 방위를 정면에 두려면 ry = 방위 + π,
+        // 고도각 e 로 보려면 -sin(rx) = sin(e) 이므로 rx = -e.
+        let rx = -startPitch, ry = startAzimuth + Math.PI, dragging = false, lx = 0, ly = 0;
         // 회전 중심 — 안에서 보면 촬영 동선의 중심이 곧 방의 한가운데다.
         const pivot = inside ? pivot0 : [0, 0, 0];
 

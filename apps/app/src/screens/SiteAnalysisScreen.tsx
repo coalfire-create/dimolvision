@@ -38,7 +38,6 @@ import { CameraCaptureModal, type CapturedPhoto } from '../components/CameraCapt
 import { AppButton, Card, ErrorBanner, StickyFooter } from '../components/ui';
 import { FadeInUp, PressableScale } from '../components/motion';
 import { ScreenHeader } from '../navigation';
-import { SAMPLE_SITES, loadSampleBase64, sampleUri, type SampleSite } from '../lib/samples';
 import { CONTENT_MAX_WIDTH, theme } from '../theme';
 
 import brandmark from '../../assets/brandmark.png';
@@ -277,8 +276,6 @@ export function SiteAnalysisScreen() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [cameraOpen, setCameraOpen] = useState(false);
-  /** 분석 중인 샘플 id(썸네일에 스피너 표시용). */
-  const [sampleId, setSampleId] = useState<string | null>(null);
   /** 선택 입력 — 연면적(평)과 주구조. 넣으면 물량 추정이 붙는다. */
   const [pyeong, setPyeong] = useState('');
   const [structure, setStructure] = useState<BuildingStructure | null>(null);
@@ -451,29 +448,6 @@ export function SiteAnalysisScreen() {
   }
 
   /**
-   * 샘플 현장 사진을 바로 분석한다 — 로그인·회원가입·사진 준비 없이 핵심 기능을 체험하는 경로.
-   * 실제 업로드와 같은 API(analyzeSite)를 타므로 결과도 실제 AI 분석 결과다.
-   */
-  async function runSample(sample: SampleSite) {
-    setError(null);
-    setResult(null);
-    setSampleId(sample.id);
-    setLoading(true);
-    try {
-      const picked = await loadSampleBase64(sample);
-      setImages([picked]);
-      await runAnalysis([picked]);
-    } catch (err) {
-      setError(
-        err instanceof ApiError ? err.message : '샘플 분석에 실패했습니다. 다시 시도해 주세요.',
-      );
-    } finally {
-      setLoading(false);
-      setSampleId(null);
-    }
-  }
-
-  /**
    * 주소 없이 촬영으로 가려 할 때. 막기만 하면 왜 안 되는지 모르므로 이유를 말하고
    * 바로 지도로 보낸다. 주소가 있어야 대장에서 연면적·층고가 오고, 그게 없으면
    * 물량도 공사비도 3D 실측도 나오지 않는다.
@@ -546,51 +520,6 @@ export function SiteAnalysisScreen() {
             </View>
           </View>
         </FadeInUp>
-
-        {/* 현장 사진이 없어도 바로 체험 — 실제 철거 현장 샘플을 같은 AI 파이프라인으로 분석 */}
-        {images.length === 0 ? (
-          <FadeInUp delay={100}>
-            <View style={styles.sampleSection}>
-              <Text style={styles.sampleHeadTitle}>샘플로 바로 체험</Text>
-              <Text style={styles.sampleHeadSub}>
-                실제 철거 현장 사진입니다. 누르면 분석이 시작됩니다.
-              </Text>
-              <View style={styles.sampleRow}>
-                {SAMPLE_SITES.map((s) => (
-                  <PressableScale
-                    key={s.id}
-                    style={styles.sampleCard}
-                    onPress={() => void runSample(s)}
-                    accessibilityRole="button"
-                    accessibilityLabel={`${s.label} 샘플 사진으로 AI 분석 실행`}
-                  >
-                    <View style={styles.sampleThumbWrap}>
-                      <Image
-                        source={{ uri: sampleUri(s) }}
-                        style={styles.sampleThumb}
-                        resizeMode="cover"
-                      />
-                      {sampleId === s.id ? (
-                        <View style={styles.sampleThumbOverlay}>
-                          <Text style={styles.sampleThumbOverlayText}>분석 중…</Text>
-                        </View>
-                      ) : null}
-                    </View>
-                    <Text style={styles.sampleCardTitle} numberOfLines={1}>
-                      {s.label}
-                    </Text>
-                    <Text style={styles.sampleCardSub} numberOfLines={2}>
-                      {s.description}
-                    </Text>
-                  </PressableScale>
-                ))}
-              </View>
-              <Text style={styles.sampleCredit}>
-                샘플 사진 © {SAMPLE_SITES.map((s) => s.credit).join(' · ')}
-              </Text>
-            </View>
-          </FadeInUp>
-        ) : null}
 
         {images.length > 0 ? (
           <FadeInUp>
@@ -1633,73 +1562,6 @@ const styles = StyleSheet.create({
   },
 
   /* 샘플 체험 섹션 - 프리미엄 카드 */
-  sampleSection: {
-    backgroundColor: colors.surface,
-    borderColor: 'rgba(0,0,0,0.04)',
-    borderWidth: 1,
-    borderRadius: radius.card,
-    padding: spacing.lg,
-    marginBottom: spacing.md,
-    ...theme.shadow.card,
-  },
-  sampleHeadTitle: {
-    color: colors.text,
-    fontSize: font.bodyLarge,
-    fontWeight: '800',
-    flexShrink: 1,
-  },
-  sampleHeadSub: {
-    color: colors.textMuted,
-    fontSize: font.body - 2,
-    marginTop: 4,
-    marginBottom: spacing.sm,
-  },
-  sampleRow: {
-    flexDirection: 'row',
-    gap: spacing.xs,
-  },
-  sampleCard: {
-    flex: 1,
-  },
-  sampleThumbWrap: {
-    position: 'relative',
-    borderRadius: 10,
-    overflow: 'hidden',
-    borderWidth: 1,
-    borderColor: colors.border,
-  },
-  sampleThumb: {
-    width: '100%',
-    aspectRatio: 4 / 3,
-  },
-  sampleThumbOverlay: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(15,23,42,0.72)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  sampleThumbOverlayText: {
-    color: '#FFFFFF',
-    fontSize: 12,
-    fontWeight: '800',
-  },
-  sampleCardTitle: {
-    color: colors.text,
-    fontSize: 13,
-    fontWeight: '800',
-    marginTop: 6,
-  },
-  sampleCardSub: {
-    color: colors.textMuted,
-    fontSize: 11,
-    lineHeight: 15,
-    marginTop: 2,
-  },
-  sampleCredit: {
-    color: colors.textMuted,
-    fontSize: 10,
-    marginTop: spacing.sm,
-  },
 
   exportRow: { flexDirection: 'row', gap: spacing.xs },
   shareBtn: {

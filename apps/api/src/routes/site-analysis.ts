@@ -417,8 +417,12 @@ export function createSiteAnalysisRouter(
 
     const quality = reconQuality(result);
     const ref = parseScaleReference(body.scaleReference);
-    const dimensions = ref ? scaleDimensions(result.extent, ref) : undefined;
     const floorPlan = buildFloorPlan(result.points);
+    // 환산 기준은 **이상점을 잘라낸 크기**여야 한다. 복원 서버가 주는 extent 는 공간 밖으로
+    // 튄 점까지 감싼 바운딩박스라, 그 축에 층고를 걸면 1단위가 실제보다 작아져 모든 치수가
+    // 같은 비율로 줄어든다(합성 검증: 원본 기준 5.8㎡ vs 절단 기준 26㎡, 실제 24㎡).
+    const scaleBase = floorPlan?.trimmedExtent ?? result.extent;
+    const dimensions = ref ? scaleDimensions(scaleBase, ref) : undefined;
     // 기준 길이가 있으면 평면도도 미터로 환산해 준다. 없으면 격자만 — 화면에서 기준을
     // 바꿔 가며 즉시 환산하므로(서버를 다시 부르지 않는다) 격자만 있어도 충분하다.
     const floorPlanScaled =

@@ -188,13 +188,23 @@ function planArea(plan: FloorPlanGrid): number {
   return plan.footprintCells.length * plan.cellSize * plan.cellSize;
 }
 
+/**
+ * 평면도 면적은 격자 해상도만큼 무디다 — 칸 단위로 끊어 세므로 가장자리에서 반 칸씩
+ * 남거나 모자란다. 정확한 일치가 아니라 **쓸 수 있는 오차 안인지**로 본다(±10%).
+ * 이보다 조이면 격자 칸 수를 바꿀 때마다 테스트가 깨지면서 정작 정확도는 보지 못한다.
+ */
+function expectAreaNear(actual: number, truth: number) {
+  expect(actual).toBeGreaterThan(truth * 0.9);
+  expect(actual).toBeLessThan(truth * 1.1);
+}
+
 describe('buildFloorPlan — 점군을 평면도로', () => {
   it('직사각형 방은 가로×세로 면적을 되찾는다', () => {
     // 6m × 4m 방(높이 2.4m). 벽에만 점이 있고 속은 비어 있다.
     const plan = buildFloorPlan(wallPoints([{ x0: 0, y0: 0, x1: 6, y1: 4 }]))!;
     expect(plan).toBeDefined();
     expect(plan.upAxis).toBe('z'); // 높이(2.4)가 가장 짧다
-    expect(planArea(plan)).toBeCloseTo(24, 0);
+    expectAreaNear(planArea(plan), 24);
   });
 
   it('L자 공간은 바운딩박스가 삼키는 빈 구역을 빼낸다', () => {
@@ -213,7 +223,7 @@ describe('buildFloorPlan — 점군을 평면도로', () => {
   it('둘레는 내부 칸의 외곽선 길이로 나온다', () => {
     const plan = buildFloorPlan(wallPoints([{ x0: 0, y0: 0, x1: 6, y1: 4 }]))!;
     // 6×4 방의 둘레는 20m. 칸 단위 외곽선 × 칸 크기로 환산해 비교한다.
-    expect(plan.perimeterEdges * plan.cellSize).toBeCloseTo(20, 0);
+    expectAreaNear(plan.perimeterEdges * plan.cellSize, 20);
   });
 
   it('가장 짧은 축을 높이로 본다 — scaleDimensions 와 같은 규칙', () => {
@@ -237,7 +247,7 @@ describe('buildFloorPlan — 점군을 평면도로', () => {
   it('좌표에 NaN 이 섞여도 유효한 점만으로 계산한다', () => {
     const pts = wallPoints([{ x0: 0, y0: 0, x1: 6, y1: 4 }]);
     pts.push([Number.NaN, 2, 1], [3, Number.POSITIVE_INFINITY, 1]);
-    expect(planArea(buildFloorPlan(pts)!)).toBeCloseTo(24, 0);
+    expectAreaNear(planArea(buildFloorPlan(pts)!), 24);
   });
 });
 
@@ -246,8 +256,8 @@ describe('scaleFloorPlan — 평면도를 미터로', () => {
 
   it('1단위=1m 이면 격자 면적이 그대로 ㎡ 다', () => {
     const s = scaleFloorPlan(plan, 1)!;
-    expect(s.floorAreaM2).toBeCloseTo(24, 0);
-    expect(s.perimeterM).toBeCloseTo(20, 0);
+    expectAreaNear(s.floorAreaM2, 24);
+    expectAreaNear(s.perimeterM, 20);
   });
 
   it('배율이 2배면 면적은 4배다', () => {
@@ -261,5 +271,96 @@ describe('scaleFloorPlan — 평면도를 미터로', () => {
     expect(scaleFloorPlan(plan, 0)).toBeUndefined();
     expect(scaleFloorPlan(plan, -1)).toBeUndefined();
     expect(scaleFloorPlan(plan, Number.NaN)).toBeUndefined();
+  });
+});
+
+describe('buildFloorPlan — 성긴 복원에서도 무너지지 않는가', () => {
+  /** 실제 촬영에 가까운 점군: 위치 잡음 + 이상점 + 안 찍힌 구간 + 벽별 커버리지 편차. */
+  function noisyRoom(opts: { total: number; noiseSd: number; outlierPct: number; gapPct: number }) {
+    let seed = 42;
+    const rnd = () => {
+      seed = (seed * 1664525 + 1013904223) % 4294967296;
+      return seed / 4294967296;
+    };
+    const gauss = (sd: number) => (rnd() + rnd() + rnd() + rnd() + rnd() + rnd() - 3) * sd;
+    // 6×4 방. 위 벽은 빨리 지나가 점이 적다 — 손으로 찍으면 벽마다 커버리지가 다르다.
+    const walls = [
+      { x0: 0, y0: 0, x1: 6, y1: 0, weight: 1.0 },
+      { x0: 0, y0: 4, x1: 6, y1: 4, weight: 0.35 },
+      { x0: 0, y0: 0, x1: 0, y1: 4, weight: 0.8 },
+      { x0: 6, y0: 0, x1: 6, y1: 4, weight: 0.6 },
+    ];
+    const wsum = walls.reduce((s, w) => s + w.weight, 0);
+    const pts: number[][] = [];
+    const nOutlier = Math.round(opts.total * opts.outlierPct);
+    for (const w of walls) {
+      const n = Math.round(((opts.total - nOutlier) * w.weight) / wsum);
+      for (let i = 0; i < n; i += 1) {
+        const t = rnd();
+        if (t > 0.4 && t < 0.4 + opts.gapPct) continue; // 안 찍힌 구간
+        pts.push([
+          w.x0 + (w.x1 - w.x0) * t + gauss(opts.noiseSd),
+          w.y0 + (w.y1 - w.y0) * t + gauss(opts.noiseSd),
+          rnd() * 2.4 + gauss(opts.noiseSd),
+        ]);
+      }
+    }
+    for (let i = 0; i < nOutlier; i += 1)
+      pts.push([-2 + rnd() * 10, -2 + rnd() * 8, -1 + rnd() * 5]);
+    return pts;
+  }
+
+  const dense = { total: 12000, noiseSd: 0.03, outlierPct: 0.03, gapPct: 0.05 };
+  const sparse = { total: 2194, noiseSd: 0.06, outlierPct: 0.08, gapPct: 0.15 };
+  const bad = { total: 800, noiseSd: 0.12, outlierPct: 0.15, gapPct: 0.3 };
+
+  it('점이 많으면 격자를 잘게, 적으면 성기게 잡는다 — 칸당 밀도를 지켜야 벽이 안 끊긴다', () => {
+    const fine = buildFloorPlan(noisyRoom(dense))!;
+    const coarse = buildFloorPlan(noisyRoom(sparse))!;
+    expect(fine.cols).toBeGreaterThan(coarse.cols);
+    expect(coarse.cellSize).toBeGreaterThan(fine.cellSize);
+  });
+
+  it('벽이 안 잡힌 줄이 공간 한복판에 구멍을 내지 않는다', () => {
+    // 양쪽 벽의 같은 구간이 안 찍히면 그 줄엔 벽 증거가 없다. 이웃에서 이어 주지 않으면
+    // 멀쩡한 방 한가운데가 띠 모양으로 잘려 나간다(고치기 전 실제 증상).
+    const plan = buildFloorPlan(noisyRoom(sparse))!;
+    const inside = new Set(plan.footprintCells);
+    let holes = 0;
+    for (let r = 1; r < plan.rows - 1; r += 1) {
+      for (let c = 1; c < plan.cols - 1; c += 1) {
+        const i = r * plan.cols + c;
+        if (inside.has(i)) continue;
+        // 위아래·좌우가 모두 내부인데 자기만 비었다면 구멍이다.
+        const surrounded =
+          inside.has(i - plan.cols) &&
+          inside.has(i + plan.cols) &&
+          inside.has(i - 1) &&
+          inside.has(i + 1);
+        if (surrounded) holes += 1;
+      }
+    }
+    expect(holes).toBe(0);
+  });
+
+  it('점이 넉넉하면 GOOD — 면적을 견적에 쓸 수 있다', () => {
+    const plan = buildFloorPlan(noisyRoom(dense))!;
+    expect(plan.reliability).toBe('GOOD');
+    expectAreaNear(planArea(plan), 24);
+  });
+
+  it('현장 실측 수준(2,194점)은 GOOD 이 아니다 — 견적에 넣지 않는다', () => {
+    // 형상은 보이지만 오차가 두 자릿수다(검증: 배율까지 먹이면 -17%). 금액 근거로 쓰면 안 된다.
+    expect(buildFloorPlan(noisyRoom(sparse))!.reliability).not.toBe('GOOD');
+  });
+
+  it('나쁜 촬영은 POOR', () => {
+    expect(buildFloorPlan(noisyRoom(bad))!.reliability).toBe('POOR');
+  });
+
+  it('근거율은 추측으로 메운 줄이 많을수록 낮아진다', () => {
+    const plan = buildFloorPlan(noisyRoom(sparse))!;
+    expect(plan.wallClosure).toBeGreaterThan(0);
+    expect(plan.wallClosure).toBeLessThanOrEqual(1);
   });
 });

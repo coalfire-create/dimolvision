@@ -203,13 +203,49 @@ export interface FloorPlanGrid {
   perimeterEdges: number;
   /** 높이로 본 축 — scaleDimensions 와 같은 규칙(가장 짧은 축). */
   upAxis: 'x' | 'y' | 'z';
+  /**
+   * 근거율(0~1) — 윤곽 안의 줄(행·열) 중 벽을 실제로 만난 줄의 비율.
+   * 나머지는 이웃 줄에서 추측해 이어 붙인 것이라, 낮을수록 도면이 추측에 기대고 있다.
+   */
+  wallClosure: number;
+  /**
+   * 이 도면의 면적을 견적에 써도 되는지.
+   * GOOD 일 때만 물량 산정에 넣는다 — 성긴 복원은 면적이 작게 나와 견적을 과소하게 만든다.
+   */
+  reliability: 'GOOD' | 'FAIR' | 'POOR';
+  /**
+   * 이상점을 잘라낸 크기(복원 단위). **미터 환산은 이걸 기준으로 해야 한다.**
+   *
+   * 복원 서버가 주는 extent 는 점군 전체의 바운딩박스라 공간 밖으로 튄 점 몇 개가 그대로
+   * 들어간다. 그 늘어난 축에 "층고 2.4m" 를 걸면 1단위가 실제보다 작게 잡혀 **모든 치수가
+   * 같은 비율로 줄어든다**. 검증에서 격자 면적은 +19% 였는데 최종값이 -17% 로 뒤집힌
+   * 원인이 정확히 이것이었다 — 오차의 주범은 도면이 아니라 배율이었다.
+   */
+  trimmedExtent: ReconExtent;
 }
 
 /** 평면도를 만들 최소 점 개수. 이보다 적으면 윤곽이 아니라 잡음이다. */
 export const MIN_PLAN_POINTS = 200;
 
-/** 격자 긴 변의 칸 수. 72칸이면 6m 공간에서 한 칸 8cm — 윤곽을 보기 충분하고 전송도 가볍다. */
-const PLAN_GRID = 72;
+/** 격자 긴 변의 최대 칸 수. 이보다 잘게 나눠도 전송량만 늘고 윤곽은 더 안 보인다. */
+const PLAN_GRID_MAX = 72;
+
+/** 최소 칸 수. 이보다 성기면 도면이라 부를 수 없다. */
+const PLAN_GRID_MIN = 16;
+
+/**
+ * 점 개수 → 격자 칸 수.
+ *
+ * 이게 평면도 정확도를 가르는 값이다. 칸을 잘게 나눌수록 윤곽이 또렷해 보이지만, 점이
+ * 성기면 칸마다 점이 한두 개도 안 들어와 벽이 끊긴 점선이 된다. 그러면 행·열의 양 끝이
+ * 무너지면서 내부가 통째로 사라진다 — 합성 검증에서 2,194점을 72칸에 넣었더니 면적이
+ * 실제의 44%로 나왔다. 점 수의 제곱근에 비례해 칸을 잡으면 칸당 점 밀도가 일정하게
+ * 유지돼, 성긴 복원에서도 벽이 이어진다.
+ */
+function planGridFor(pointCount: number): number {
+  const grid = Math.round(Math.sqrt(pointCount) / 2.2);
+  return Math.max(PLAN_GRID_MIN, Math.min(PLAN_GRID_MAX, grid));
+}
 
 /**
  * 이상점 잘라내기 비율. COLMAP 점군에는 공간 밖으로 튄 점이 섞이고, 그대로 두면 격자가
@@ -232,7 +268,15 @@ function trimmedBounds(values: number[]): { min: number; max: number } {
  * 실제 내부를 반드시 포함하는 상한이므로 교집합이 가장 조인 상한이고, L자·ㄷ자처럼 꺾인
  * 공간에서 바운딩박스가 삼키던 빈 구역이 여기서 빠진다.
  */
-export function buildFloorPlan(points: readonly number[][]): FloorPlanGrid | undefined {
+export interface FloorPlanOptions {
+  /** 격자 긴 변의 칸 수. 기본은 점 개수에서 정한다({@link planGridFor}) — 튜닝 검증용으로만 넘긴다. */
+  grid?: number;
+}
+
+export function buildFloorPlan(
+  points: readonly number[][],
+  options: FloorPlanOptions = {},
+): FloorPlanGrid | undefined {
   const valid = points.filter(
     (p) => p.length >= 3 && Number.isFinite(p[0]) && Number.isFinite(p[1]) && Number.isFinite(p[2]),
   );
@@ -247,7 +291,7 @@ export function buildFloorPlan(points: readonly number[][]): FloorPlanGrid | und
   const spanB = spans[b]!;
   if (!(spanA > 0) || !(spanB > 0)) return undefined;
 
-  const cellSize = Math.max(spanA, spanB) / PLAN_GRID;
+  const cellSize = Math.max(spanA, spanB) / (options.grid ?? planGridFor(valid.length));
   const cols = Math.max(1, Math.ceil(spanA / cellSize));
   const rows = Math.max(1, Math.ceil(spanB / cellSize));
 
@@ -279,30 +323,84 @@ export function buildFloorPlan(points: readonly number[][]): FloorPlanGrid | und
   }
   if (wallCells.length === 0) return undefined;
 
+  /**
+   * 줄(행/열)마다 벽을 처음·마지막으로 만난 칸. 만나지 못한 줄은 [-1, -1].
+   *
+   * 벽이 하나도 안 잡힌 줄은 "여기가 비었다" 가 아니라 **"모른다"** 다. 카메라가 그 구간을
+   * 안 비췄거나 민무늬 벽이라 점이 안 붙은 것뿐이다. 그런데 이걸 빈 줄로 처리하면 채우기가
+   * 그 줄을 통째로 지워, 멀쩡한 공간 한복판에 띠 모양 구멍이 생긴다(검증에서 면적 -34%의
+   * 원인이 정확히 이것이었다). 그래서 아래에서 이웃 줄로부터 이어 준다.
+   */
+  function spansAlong(
+    lineCount: number,
+    cellCount: number,
+    at: (line: number, cell: number) => number,
+  ) {
+    const spans: Array<[number, number]> = [];
+    for (let line = 0; line < lineCount; line += 1) {
+      let lo = -1;
+      let hi = -1;
+      for (let cell = 0; cell < cellCount; cell += 1) {
+        if (counts[at(line, cell)]! >= threshold) {
+          if (lo < 0) lo = cell;
+          hi = cell;
+        }
+      }
+      spans.push([lo, hi]);
+    }
+    return spans;
+  }
+
+  /**
+   * 벽을 못 만난 줄을 이웃에서 이어 준다. **바깥쪽 줄은 건드리지 않는다** — 처음 벽을 만난
+   * 줄보다 앞, 마지막보다 뒤는 건물 밖이다. 사이에 낀 줄만 위아래 이웃 span 의 교집합으로
+   * 채워, 없는 공간을 지어내지 않으면서 구멍도 만들지 않는다.
+   * 이어 붙인 줄 수를 함께 돌려준다 — 추측으로 메운 양이 곧 도면을 못 믿을 근거다.
+   */
+  function bridgeSpans(spans: Array<[number, number]>): { bridged: number; evidence: number } {
+    const first = spans.findIndex(([lo]) => lo >= 0);
+    if (first < 0) return { bridged: 0, evidence: 0 };
+    let last = spans.length - 1;
+    while (last > first && spans[last]![0] < 0) last -= 1;
+
+    let bridged = 0;
+    let evidence = 0;
+    for (let i = first; i <= last; i += 1) {
+      if (spans[i]![0] >= 0) {
+        evidence += 1;
+        continue;
+      }
+      let prev = i - 1;
+      while (prev >= first && spans[prev]![0] < 0) prev -= 1;
+      let next = i + 1;
+      while (next <= last && spans[next]![0] < 0) next += 1;
+      const a = spans[prev]!;
+      const b = spans[next]!;
+      spans[i] = [Math.max(a[0], b[0]), Math.min(a[1], b[1])];
+      bridged += 1;
+    }
+    return { bridged, evidence };
+  }
+
+  const rowSpans = spansAlong(rows, cols, (r, c) => r * cols + c);
+  const colSpans = spansAlong(cols, rows, (c, r) => r * cols + c);
+  const rowBridge = bridgeSpans(rowSpans);
+  const colBridge = bridgeSpans(colSpans);
+
   const rowFill = new Uint8Array(cols * rows);
   for (let r = 0; r < rows; r += 1) {
-    let lo = -1;
-    let hi = -1;
-    for (let c = 0; c < cols; c += 1) {
-      if (counts[r * cols + c]! >= threshold) {
-        if (lo < 0) lo = c;
-        hi = c;
-      }
-    }
+    const [lo, hi] = rowSpans[r]!;
     for (let c = lo; c >= 0 && c <= hi; c += 1) rowFill[r * cols + c] = 1;
   }
   const colFill = new Uint8Array(cols * rows);
   for (let c = 0; c < cols; c += 1) {
-    let lo = -1;
-    let hi = -1;
-    for (let r = 0; r < rows; r += 1) {
-      if (counts[r * cols + c]! >= threshold) {
-        if (lo < 0) lo = r;
-        hi = r;
-      }
-    }
+    const [lo, hi] = colSpans[c]!;
     for (let r = lo; r >= 0 && r <= hi; r += 1) colFill[r * cols + c] = 1;
   }
+
+  // 근거율 = 벽을 실제로 만난 줄의 비율. 나머지는 이웃에서 추측해 메운 줄이다.
+  const lines = rowBridge.bridged + rowBridge.evidence + colBridge.bridged + colBridge.evidence;
+  const wallClosure = lines > 0 ? (rowBridge.evidence + colBridge.evidence) / lines : 0;
 
   const inside = new Uint8Array(cols * rows);
   const footprintCells: number[] = [];
@@ -333,7 +431,34 @@ export function buildFloorPlan(points: readonly number[][]): FloorPlanGrid | und
     footprintCells,
     perimeterEdges,
     upAxis: (['x', 'y', 'z'] as const)[up]!,
+    wallClosure: Math.round(wallClosure * 100) / 100,
+    reliability: planReliability(valid.length, wallClosure),
+    trimmedExtent: {
+      x: spans[0]!,
+      y: spans[1]!,
+      z: spans[2]!,
+      diagonal: Math.hypot(spans[0]!, spans[1]!, spans[2]!),
+    },
   };
+}
+
+/**
+ * 면적을 견적에 넣어도 되는지 판정.
+ *
+ * 기준은 합성 검증에서 왔다. 같은 6×4 방(24㎡)을 잡음·이상점·미촬영 구간만 바꿔 재면:
+ *   점 12,000 · 근거율 0.98 → 26.0㎡ (+8%)   쓸 수 있다
+ *   점  2,194 · 근거율 0.89 → 19.9㎡ (-17%)  형상은 보이지만 금액 근거로는 못 쓴다
+ *   점    800 · 근거율 0.92 → 8.8㎡  (-63%)  쓰면 안 된다
+ *
+ * 점이 적을수록 면적이 **작게** 나오는 쪽으로 무너진다(벽이 끊겨 윤곽이 안으로 말린다).
+ * 과소 견적은 계약 뒤 추가정산 분쟁이 되므로 애매하면 쓰지 않는 쪽으로 판정한다.
+ * 근거율만으로는 못 거른다 — 위 표에서 보듯 800점짜리도 0.92가 나온다. 점 개수가
+ * 1차 기준이고 근거율은 보조다.
+ */
+function planReliability(pointCount: number, wallClosure: number): 'GOOD' | 'FAIR' | 'POOR' {
+  if (pointCount >= 6000 && wallClosure >= 0.9) return 'GOOD';
+  if (pointCount >= 1500 && wallClosure >= 0.7) return 'FAIR';
+  return 'POOR';
 }
 
 export interface ScaledFloorPlan {

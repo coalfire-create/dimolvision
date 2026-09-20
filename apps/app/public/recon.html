@@ -259,10 +259,12 @@
       </div>
 
       <div id="scaleCard" class="card hidden">
-        <h2>3. 크기 기준 정하기</h2>
+        <h2>3. 크기 기준 (자동)</h2>
         <p class="sub">
-          사진만으로 만든 3D 는 <b>형상은 알아도 크기는 모릅니다</b>. 같은 모양이 1m 일 수도
-          10m 일 수도 있기 때문입니다. 아는 길이를 하나 고르면 전체가 미터로 환산됩니다.
+          영상으로 만든 3D 는 <b>형상은 알아도 크기는 모릅니다</b>. 같은 모양이 1m 일 수도
+          10m 일 수도 있기 때문입니다. 그래서 <b>표준 실내 문 높이 2,100mm</b> 를 기준으로
+          자동 환산합니다(건축물대장에서 그 건물의 실제 층고를 받았으면 그쪽을 씁니다).
+          아래에서 바꿀 수 있지만, 바꾸지 않아도 견적까지 그대로 진행됩니다.
         </p>
         <div id="presets" class="presets"></div>
         <div class="row">
@@ -1781,7 +1783,7 @@ let CAPTURE_QUALITY = 0.58;
       let lastExtent = null;
 
       const PRESETS = [
-        { label: '실내 문 높이', m: 2.1, axis: 'shortest', hint: '표준 실내 문' },
+        { label: '실내 문 높이', m: 2.1, axis: 'shortest', hint: '표준 실내 문(KS 2,100mm)', isDoor: true },
         { label: '주택 층고', m: 2.4, axis: 'shortest', hint: '단독·다세대' },
         { label: '상가 층고', m: 2.7, axis: 'shortest', hint: '근린생활시설' },
         { label: '창고 층고', m: 3.0, axis: 'shortest', hint: '공장·창고' },
@@ -1820,6 +1822,30 @@ let CAPTURE_QUALITY = 0.58;
         if (axis === 'diagonal') return extent.diagonal;
         if (axis === 'longest') return sorted[2];
         return sorted[0];
+      }
+
+      /**
+       * 크기 기준을 **고르지 않아도** 치수가 나오게 한다.
+       *
+       * 고르는 화면을 그대로 두면, 거기서 멈춘 사람은 바닥면적이 없는 채로
+       * 분석 화면에 간다. 그러면 견적이 영상이 아니라 사진만 보고 나온다 —
+       * 영상으로 잰 면적이 있는데도 쓰지 못하는 것이다.
+       *
+       * 그래서 기본값을 먼저 적용해 둔다. 건축물대장에서 그 건물의 실제 층고를
+       * 받았으면 그걸 쓰고, 없으면 **표준 실내 문 높이 2.1m** 를 쓴다.
+       * 바꾸고 싶은 사람은 아래에서 바꾸면 되고, 안 바꿔도 결과는 나온다.
+       */
+      function applyDefaultScale() {
+        const i = PRESETS.findIndex((p) => p.fromRegister) >= 0
+          ? PRESETS.findIndex((p) => p.fromRegister)
+          : PRESETS.findIndex((p) => p.isDoor);
+        const p = PRESETS[i < 0 ? 0 : i];
+        $('axis').value = p.axis;
+        $('meters').value = p.m;
+        const btns = $('presets').querySelectorAll('.preset');
+        btns.forEach((b) => b.classList.remove('on'));
+        btns[i < 0 ? 0 : i]?.classList.add('on');
+        renderScaled();
       }
 
       function renderScaled() {
@@ -1983,13 +2009,7 @@ let CAPTURE_QUALITY = 0.58;
           void clearCapture();
           $('scaleCard').classList.remove('hidden');
           renderPresets();
-          // 대장 층고를 알면 사용자가 고르기 전에 이미 치수가 떠 있어야 한다.
-          if (registerInfo?.floorHeightM > 0) {
-            $('axis').value = 'shortest';
-            $('meters').value = registerInfo.floorHeightM;
-            $('presets').querySelector('.preset')?.classList.add('on');
-          }
-          renderScaled();
+          applyDefaultScale();
         } catch (e) {
           // 촬영은 저장돼 있다. 다시 찍지 않아도 된다는 걸 분명히 알린다.
           showRetry(frames, e.message || '복원 중 문제가 발생했습니다.');

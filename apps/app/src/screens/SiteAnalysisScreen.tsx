@@ -308,6 +308,13 @@ export function SiteAnalysisScreen() {
    */
   const [fromCapture, setFromCapture] = useState(false);
   /**
+   * 영상으로 잰 바닥면적(㎡). 3D 복원 화면이 URL 로 넘겨준다.
+   *
+   * 이 값이 견적의 물량을 정한다. 그런데 화면에는 평수 칸이 조용히 채워질 뿐이라
+   * "사진만 보고 견적을 내는 것" 처럼 보였다. 어디서 온 숫자인지 말해야 한다.
+   */
+  const [measuredAreaM2, setMeasuredAreaM2] = useState<number | null>(null);
+  /**
    * 지도에서 찍은 현장 주소. 지번 코드가 함께 가면 서버가 건축물대장을 조회해
    * 주구조·연면적·사용승인연도를 채운다 — 사용자가 몰라도 되는 값들이다.
    */
@@ -320,7 +327,10 @@ export function SiteAnalysisScreen() {
     const found = readParcelFromUrl();
     if (found) setParcel(found);
     const area = readAreaFromUrl();
-    if (area !== undefined) setPyeong(String(m2ToPyeong(area)));
+    if (area !== undefined) {
+      setPyeong(String(m2ToPyeong(area)));
+      setMeasuredAreaM2(area);
+    }
 
     // 영상으로 찍고 넘어왔으면 사용자가 다시 누르게 하지 않고 바로 분석한다.
     const frames = takeCapturedFrames();
@@ -724,6 +734,14 @@ export function SiteAnalysisScreen() {
           <FadeInUp delay={60}>
             <View style={styles.areaCard}>
               <Text style={styles.areaTitle}>건물 정보 (선택)</Text>
+              {measuredAreaM2 !== null ? (
+                <View style={styles.measuredRow}>
+                  <AppIcon name="check" size={14} color="#34D399" />
+                  <Text style={styles.measuredText}>
+                    {`영상으로 잰 바닥면적 ${Math.round(measuredAreaM2)}㎡(${m2ToPyeong(measuredAreaM2)}평)로 물량을 잡았습니다`}
+                  </Text>
+                </View>
+              ) : null}
               <Text style={styles.areaSub}>
                 {parcel
                   ? '건축물대장에서 자동으로 채웁니다. 실제와 다르면 직접 고쳐 다시 분석하세요.'
@@ -1693,6 +1711,22 @@ const styles = StyleSheet.create({
     lineHeight: 19,
   },
   /* 로그인 없이 체험 고지 */
+  /* 영상으로 잰 면적이 반영됐다는 표시 — 이 숫자가 견적 물량의 근거다. */
+  measuredRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginTop: spacing.xs,
+    marginBottom: spacing.xs,
+  },
+  measuredText: {
+    flex: 1,
+    color: '#047857',
+    fontSize: 13,
+    fontWeight: '700',
+    lineHeight: 18,
+  },
+
   noLoginRow: {
     flexDirection: 'row',
     alignItems: 'center',

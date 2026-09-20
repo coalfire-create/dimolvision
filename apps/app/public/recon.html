@@ -180,7 +180,8 @@
           </p>
           <ul class="gl">
             <li><b>옆으로 이동</b> — 벽을 따라 게걸음처럼 걸으며 촬영합니다</li>
-            <li><b>한 바퀴 돌기</b> — 방이면 벽을 따라, 건물이면 외곽을 따라 크게 돕니다</li>
+            <li><b>한 바퀴 돌기</b> — 방이면 벽을 따라, 건물이면 외곽을 따라 크게 돕니다.
+              <b>모서리에서 도는 건 정상</b>입니다. 천천히 돌면 그 구간도 함께 담깁니다</li>
             <li><b>2~3m 거리 유지</b> — 너무 가까우면 화면이 급변해 이어지지 않습니다</li>
             <li><b>좁은 통로·작은 방이면</b> — 옆으로 걸을 공간이 없으면 <b>통로를 따라 앞으로</b>
               천천히 걸으세요. 카메라는 진행 방향을 보되 살짝(30~45°) 벽 쪽으로 틀면
@@ -708,7 +709,8 @@ let CAPTURE_QUALITY = 0.58;
           why:
             '3D 는 같은 지점을 <b>다른 위치에서</b> 본 차이로 깊이를 계산합니다. 한자리에 서서 ' +
             '카메라만 돌리면 그 차이가 0 이라 원리적으로 복원되지 않습니다. 프레임을 아무리 ' +
-            '많이 넣어도 결과는 같습니다.',
+            '많이 넣어도 결과는 같습니다. (모서리에서 잠깐 도는 것은 정상이며, 오래 이어질 때만 ' +
+            '이 안내가 나옵니다.)',
           how: [
             '벽에서 <b>2~3m 떨어져</b> 벽을 바라본 채로 <b>옆으로 걸으세요</b>. 게걸음처럼.',
             '좁아서 옆으로 못 걸으면 <b>통로를 따라 앞으로</b> 천천히 걸으세요. 그것도 시차가 됩니다.',
@@ -950,7 +952,14 @@ let CAPTURE_QUALITY = 0.58;
         // 흔들린 프레임은 특징점이 사라져 넣을수록 해가 된다. 최근 선명도의 이 비율
         // 아래로 떨어지면 버린다(걸으며 찍으면 흔들린 프레임이 실제로 섞인다).
         BLUR_RATIO: 0.55,
-        FAST: 26,            // 이보다 빠르면 흔들림으로 특징점이 사라진다
+        // 이보다 빠르면 겹침이 무너진다. 판정 화면 폭이 192px 이므로 45px 는 겹침 77% 다
+        // (사진측량 통상 요구는 60~80%). 좁은 통로에서는 벽이 가까워 화면이 빨리 흐르는데,
+        // 예전 값(26px)은 겹침 86% 여도 "너무 빠릅니다" 를 띄워 촬영을 계속 막았다.
+        FAST: 45,
+        // 코너를 도는 시간. 이 안의 회전은 정상 촬영으로 본다.
+        TURN_MS: 3500,
+        // 코너에서도 프레임을 담는다 — 안 담으면 촬영이 끊겨 앞뒤를 잇지 못한다.
+        TURN_SHOT_MS: 700,
         SMOOTH: 4,           // 코칭 문구가 깜빡이지 않게 최근 판정을 모아 다수결
       };
 
@@ -959,6 +968,7 @@ let CAPTURE_QUALITY = 0.58;
         STILL:   { cls: 'warn', msg: '움직이세요',               sub: '옆으로 걷거나, 좁으면 통로를 따라 앞으로 걸으세요' },
         ROTATE:  { cls: 'bad',  msg: '제자리에서 돌리지 마세요',   sub: '손목이 아니라 몸이 이동해야 합니다' },
         FAST:    { cls: 'warn', msg: '너무 빠릅니다',             sub: '흔들리면 맞출 기준점이 사라집니다' },
+        TURN:    { cls: 'warn', msg: '코너를 도는 중입니다',       sub: '천천히 돌고, 돌고 나면 다시 걸으세요 — 계속 담고 있습니다' },
         FLAT:    { cls: 'warn', msg: '무늬가 없습니다',           sub: '가구·창틀·배관이 화면에 들어오게 하세요' },
         GOOD:    { cls: 'good', msg: '좋습니다 — 계속 걸으세요',   sub: '같은 속도로 벽을 따라 이동하세요' },
       };
@@ -1034,7 +1044,7 @@ let CAPTURE_QUALITY = 0.58;
 
         liveState = {
           stream, video, shots: [], tinies: [], history: [], lastShot: 0,
-          sharps: [], timer: null, started: Date.now(),
+          sharps: [], rotateSince: null, timer: null, started: Date.now(),
         };
         setCoach('START', 0);
 
@@ -1060,18 +1070,31 @@ let CAPTURE_QUALITY = 0.58;
 
           const prev = st.tinies[st.tinies.length - 1 - LIVE.GAP];
           if (!prev) return;
+          const now = Date.now();
 
           const m = pairMetrics(prev, tiny);
           const key = classify(m);
           window.__liveMetrics = m;
           st.history.push(key);
-          const shown = smooth(st.history);
+          let shown = smooth(st.history);
+
+          // 벽을 따라 걷다 모서리에 닿으면 반드시 돌아야 한다. 그 회전까지 "잘못" 이라고
+          // 하면 건물을 한 바퀴 돌 방법이 없다. 잠깐의 회전은 코너로 보고 계속 담는다.
+          // 오래 이어지면 그때는 제자리에서 훑고 있는 것이다.
+          if (shown === 'ROTATE') {
+            st.rotateSince ??= now;
+            if (now - st.rotateSince < LIVE.TURN_MS) shown = 'TURN';
+          } else {
+            st.rotateSince = null;
+          }
           setCoach(shown, st.shots.length);
 
-          // 잘 걷고 있는 순간에만 프레임을 담는다. 제자리 회전 구간을 담으면
-          // 복원되지 않는 프레임만 늘어나 정합률을 끌어내린다.
-          const now = Date.now();
-          if (shown === 'GOOD' && now - st.lastShot >= LIVE.SHOT_MS && st.shots.length < LIVE.MAX) {
+          // 코너 구간도 담는다. 안 담으면 촬영이 코너에서 끊겨 COLMAP 이 앞뒤를 잇지
+          // 못하고 조각난 모델이 나온다 — 회전 프레임 자체는 깊이를 주지 않지만
+          // 앞뒤를 연결하는 다리 역할을 한다. 다만 간격을 늘려 수를 줄인다.
+          const interval = shown === 'TURN' ? LIVE.TURN_SHOT_MS : LIVE.SHOT_MS;
+          if ((shown === 'GOOD' || shown === 'TURN') &&
+              now - st.lastShot >= interval && st.shots.length < LIVE.MAX) {
             st.lastShot = now;
 
             // 걸으며 찍으면 흔들린 프레임이 섞인다. 흔들리면 특징점이 사라져

@@ -11,10 +11,10 @@ export const theme = {
   spacing: SPACING,
   touch: TOUCH,
   radius: {
-    card: 28, // 토스처럼 훨씬 더 둥근 모서리
-    button: 20, // 버튼도 더 둥글게
-    badge: 999,
-    pill: 999,
+    card: 12, // 밤티(둥근) 느낌 제거, 각진 세련미
+    button: 8, // 버튼도 둥근 모서리 대신 각지게
+    badge: 4,
+    pill: 4,
   },
   /** 그림자 프리셋 — 토스 스타일은 그림자를 거의 쓰지 않으나, 팝업 등에 아주 은은하게 사용 */
   shadow: {

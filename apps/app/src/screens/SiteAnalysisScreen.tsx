@@ -1497,9 +1497,11 @@ const styles = StyleSheet.create({
     backgroundColor: colors.surface,
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 999,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 4, // 박스형으로 샤프하게
+    borderWidth: 1,
+    borderColor: colors.border,
   },
   heroCardBadgeText: {
     color: colors.textMuted,
@@ -1556,7 +1558,7 @@ const styles = StyleSheet.create({
   iconCircle: {
     width: 48,
     height: 48,
-    borderRadius: 24,
+    borderRadius: 8, // 원 대신 박스형
     backgroundColor: '#EFF6FF',
     alignItems: 'center',
     justifyContent: 'center',
@@ -1584,14 +1586,14 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
-    marginTop: spacing.sm,
-    borderTopColor: 'rgba(255,255,255,0.12)',
+    marginTop: spacing.md, // 좀 더 떨어지게
+    borderTopColor: colors.border,
     borderTopWidth: 1,
-    paddingTop: spacing.sm,
+    paddingTop: spacing.md,
   },
   noLoginText: {
-    color: '#A7F3D0',
-    fontSize: 12,
+    color: colors.text,
+    fontSize: 13,
     fontWeight: '700',
   },
 
@@ -1682,13 +1684,13 @@ const styles = StyleSheet.create({
     position: 'absolute',
     left: 12,
     top: 12,
-    backgroundColor: 'rgba(37,99,235,0.92)',
-    borderRadius: 999,
+    backgroundColor: 'rgba(0,0,0,0.85)', // 검정색의 세련된 모노크롬 톤
+    borderRadius: 4, // 각진 모양
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
-    paddingHorizontal: 10,
-    paddingVertical: 5,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
   },
   multiBadgeText: { color: '#FFFFFF', fontSize: 12, fontWeight: '800' },
   thumbStrip: { gap: spacing.xs, paddingBottom: spacing.xs },
@@ -1706,8 +1708,8 @@ const styles = StyleSheet.create({
     top: -6,
     width: 22,
     height: 22,
-    borderRadius: 11,
-    backgroundColor: 'rgba(15,23,42,0.88)',
+    borderRadius: 4, // 박스형으로 변경
+    backgroundColor: 'rgba(0,0,0,0.85)',
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -1720,35 +1722,37 @@ const styles = StyleSheet.create({
   },
 
   /* 연면적 입력 카드 */
-  /* 영상 촬영 (권장 동선) */
+  /* 영상 촬영 (권장 동선) - 세련된 다크 박스 */
   videoCard: {
-    backgroundColor: '#0F172A',
+    backgroundColor: '#000000', // 완전한 블랙으로 고급스러운 프리미엄 느낌
     borderRadius: radius.card,
-    padding: spacing.md,
+    padding: spacing.lg,
     marginTop: spacing.md,
   },
   videoBadge: {
     alignSelf: 'flex-start',
-    backgroundColor: 'rgba(52,211,153,0.18)',
-    borderRadius: 999,
-    paddingHorizontal: 10,
-    paddingVertical: 3,
-    marginBottom: 6,
+    backgroundColor: '#333333',
+    borderRadius: 4, // 박스형
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    marginBottom: 8,
+    borderWidth: 1,
+    borderColor: '#555555',
   },
-  videoBadgeText: { color: '#6EE7B7', fontSize: 11, fontWeight: '800' },
+  videoBadgeText: { color: '#FFFFFF', fontSize: 11, fontWeight: '700', letterSpacing: 1 },
   videoTitle: { color: '#F8FAFC', fontSize: font.bodyLarge, fontWeight: '800' },
   videoSub: { color: '#94A3B8', fontSize: 13, lineHeight: 19, marginTop: 4 },
   videoCta: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 6,
-    backgroundColor: '#F8FAFC',
+    gap: 8,
+    backgroundColor: '#FFFFFF',
     borderRadius: radius.button,
-    paddingVertical: 12,
-    marginTop: spacing.sm,
+    paddingVertical: 14,
+    marginTop: spacing.md,
   },
-  videoCtaText: { color: '#0F172A', fontSize: 15, fontWeight: '800' },
+  videoCtaText: { color: '#000000', fontSize: 15, fontWeight: '700' },
 
   /* 현장 주소(지도 선택) */
   addrCard: {
@@ -2151,37 +2155,30 @@ const styles = StyleSheet.create({
   },
   actionCard: {
     flex: 1,
-    backgroundColor: colors.background,
-    borderColor: colors.border,
-    borderWidth: 1.5,
-    borderRadius: radius.card,
+    backgroundColor: '#000000', // 모노크롬 다크
+    borderRadius: 4, // 아주 각진 박스
     padding: spacing.md,
     alignItems: 'center',
     justifyContent: 'center',
-    shadowColor: '#0B1B3A',
-    shadowOpacity: 0.04,
-    shadowRadius: 8,
-    shadowOffset: { width: 0, height: 3 },
-    elevation: 2,
   },
   actionIconCircle: {
-    width: 52,
-    height: 52,
-    borderRadius: 26,
-    backgroundColor: colors.primarySoft,
+    width: 48,
+    height: 48,
+    borderRadius: 4, // 아이콘 배경도 원 대신 각진 박스로
+    backgroundColor: '#333333',
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: spacing.xs,
   },
   actionCardTitle: {
-    color: colors.text,
+    color: '#FFFFFF',
     fontSize: font.bodyLarge,
-    fontWeight: '800',
+    fontWeight: '700',
   },
   actionCardSub: {
-    color: colors.textMuted,
+    color: '#A0A0A0',
     fontSize: 13,
-    marginTop: 2,
+    marginTop: 4,
   },
 
   /* 분석 결과 리포트 UI */

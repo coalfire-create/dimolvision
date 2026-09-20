@@ -74,6 +74,50 @@ export interface BuildingRegisterConfig {
   serviceKey: string;
   timeoutMs: number;
   baseUrl?: string;
+  /** 한 엔드포인트당 시도 횟수. 공공데이터는 간헐적으로 응답이 깨진다. 기본 3. */
+  attempts?: number;
+  /** 재시도 간격(ms). 기본 400. */
+  retryDelayMs?: number;
+  /** 조회 결과 캐시(선택). 같은 지번은 건물이 바뀌지 않으므로 오래 써도 된다. */
+  cache?: RegisterCacheStore;
+}
+
+/** 지번 → 대장 정보 캐시. 성공만 저장한다(실패를 굳히면 장애가 연장된다). */
+export interface RegisterCacheStore {
+  get(key: string): Promise<BuildingRegisterInfo | undefined>;
+  set(key: string, value: BuildingRegisterInfo, ttlSeconds: number): Promise<void>;
+}
+
+/** 건물은 하루 사이에 바뀌지 않는다. 길게 잡아도 위험이 없다. */
+export const REGISTER_CACHE_TTL_SECONDS = 7 * 24 * 60 * 60;
+
+/**
+ * 한 번의 호출 결과.
+ *   ok    — 값이 있다
+ *   empty — 정상 응답인데 그 지번에 대장이 없다(나대지·무허가). 재시도해도 같다
+ *   error — 호출·파싱이 깨졌다. 재시도할 가치가 있다
+ * 이 셋을 구분하지 않으면 "건물이 없는 것" 과 "조회가 실패한 것" 이 똑같이 보여
+ * 재시도해야 할 때 포기하고, 포기해야 할 때 재시도하게 된다.
+ */
+type Outcome =
+  | { kind: 'ok'; info: BuildingRegisterInfo }
+  | { kind: 'empty' }
+  | { kind: 'error' };
+
+/** 표제부를 먼저 보고, 없으면 총괄표제부를 본다. 단지형·집합건물은 총괄에만 있다. */
+const ENDPOINTS = ['getBrTitleInfo', 'getBrRecapTitleInfo'] as const;
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/** 캐시 키 — 지번을 특정하는 다섯 값. */
+export function registerCacheKey(q: BuildingRegisterQuery): string {
+  return [
+    q.sigunguCd,
+    q.bjdongCd,
+    q.platGbCd ?? '0',
+    (q.bun ?? '0').padStart(4, '0'),
+    (q.ji ?? '0').padStart(4, '0'),
+  ].join('-');
 }
 
 const DEFAULT_BASE_URL = 'https://apis.data.go.kr/1613000/BldRgstHubService';
@@ -86,6 +130,32 @@ export class BuildingRegisterClient {
   constructor(private readonly config: BuildingRegisterConfig) {}
 
   async lookup(q: BuildingRegisterQuery): Promise<BuildingRegisterInfo | undefined> {
+    const key = registerCacheKey(q);
+    const cache = this.config.cache;
+
+    const hit = await cache?.get(key).catch(() => undefined);
+    if (hit) return hit;
+
+    const attempts = Math.max(1, this.config.attempts ?? 3);
+    const delay = this.config.retryDelayMs ?? 400;
+
+    for (const endpoint of ENDPOINTS) {
+      for (let attempt = 1; attempt <= attempts; attempt += 1) {
+        const out = await this.callOnce(endpoint, q);
+        if (out.kind === 'ok') {
+          await cache?.set(key, out.info, REGISTER_CACHE_TTL_SECONDS).catch(() => {});
+          return out.info;
+        }
+        // 그 지번에 대장이 없는 것은 재시도로 바뀌지 않는다 — 다음 대장 종류로 넘어간다.
+        if (out.kind === 'empty') break;
+        if (attempt < attempts) await sleep(delay * attempt);
+      }
+    }
+    return undefined;
+  }
+
+  /** 한 번 호출하고 결과를 세 갈래로 분류한다. */
+  private async callOnce(endpoint: string, q: BuildingRegisterQuery): Promise<Outcome> {
     const base = this.config.baseUrl ?? DEFAULT_BASE_URL;
     const params = new URLSearchParams({
       serviceKey: this.config.serviceKey,
@@ -102,17 +172,30 @@ export class BuildingRegisterClient {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), this.config.timeoutMs);
     try {
-      const res = await fetch(`${base}/getBrTitleInfo?${params.toString()}`, {
+      const res = await fetch(`${base}/${endpoint}?${params.toString()}`, {
         signal: controller.signal,
       });
-      if (!res.ok) return undefined;
-      const body = (await res.json()) as PublicDataResponse;
+      if (!res.ok) return { kind: 'error' };
+
+      // 오류일 때 XML 이나 HTML 이 오기도 한다. text 로 받아 우리가 판단한다.
+      const text = await res.text();
+      let body: PublicDataResponse;
+      try {
+        body = JSON.parse(text) as PublicDataResponse;
+      } catch {
+        return { kind: 'error' };
+      }
+
+      // resultCode 가 없거나 '00' 이 아니면 정상 응답이 아니다(쿼터 초과·키 오류·일시 장애).
+      const code = body.response?.header?.resultCode;
+      if (code !== '00') return { kind: 'error' };
+
       const items = normalizeItems(body);
-      if (items.length === 0) return undefined;
+      if (items.length === 0) return { kind: 'empty' };
 
       const best = items.reduce((a, b) => (num(b.totArea) > num(a.totArea) ? b : a));
       const structureName = best.strctCdNm?.trim() || undefined;
-      return {
+      const info: BuildingRegisterInfo = {
         structureName,
         structure: toBuildingStructure(structureName),
         totalFloorAreaM2: num(best.totArea) || undefined,
@@ -121,9 +204,11 @@ export class BuildingRegisterClient {
         mainUse: best.mainPurpsCdNm?.trim() || undefined,
         buildingName: best.bldNm?.trim() || undefined,
       };
+      // 연면적이 없으면 물량·견적에 쓸 수 없다 — 다른 대장 종류를 더 본다.
+      if (!info.totalFloorAreaM2) return { kind: 'empty' };
+      return { kind: 'ok', info };
     } catch {
-      // 공공데이터는 장애·쿼터가 잦다. 없으면 없는 대로 분석을 진행한다.
-      return undefined;
+      return { kind: 'error' };
     } finally {
       clearTimeout(timer);
     }
@@ -141,7 +226,10 @@ interface BrTitleItem {
 }
 
 interface PublicDataResponse {
-  response?: { body?: { items?: { item?: BrTitleItem | BrTitleItem[] } | '' } };
+  response?: {
+    header?: { resultCode?: string; resultMsg?: string };
+    body?: { items?: { item?: BrTitleItem | BrTitleItem[] } | '' };
+  };
 }
 
 /** item 은 0건이면 빈 문자열, 1건이면 객체, 여러 건이면 배열로 온다. */

@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import type { SiteAnalysis } from '@dimol/shared';
+import type { BuildingRegisterInfo } from '../public-data/building-register.js';
 
 /**
  * 분석 결과 캐시.
@@ -123,6 +124,64 @@ export async function createAnalysisCache(): Promise<AnalysisCacheStore> {
     return new VercelRuntimeAnalysisCache(mod.getCache({ namespace: 'site-analysis' }));
   } catch {
     return new MemoryAnalysisCache();
+  }
+}
+
+/**
+ * 건축물대장 조회 캐시. 분석 캐시와 같은 저장소를 쓰되 네임스페이스만 다르다.
+ *
+ * 왜 필요한가: 공공데이터포털은 간헐적으로 응답이 깨진다(실측에서 정상 응답 사이에
+ * 파싱 불가 응답이 섞였다). 한 번 성공한 지번을 굳혀 두면 그 뒤로는 외부 호출 자체가
+ * 사라져 실패할 수가 없다. 건물은 하루 사이에 바뀌지 않으므로 오래 잡아도 안전하다.
+ */
+export async function createRegisterCache(): Promise<{
+  get(key: string): Promise<BuildingRegisterInfo | undefined>;
+  set(key: string, value: BuildingRegisterInfo, ttlSeconds: number): Promise<void>;
+}> {
+  const memory = new Map<string, { value: BuildingRegisterInfo; expiresAt: number }>();
+  const fallback = {
+    async get(key: string) {
+      const hit = memory.get(key);
+      if (!hit) return undefined;
+      if (hit.expiresAt <= Date.now()) {
+        memory.delete(key);
+        return undefined;
+      }
+      return hit.value;
+    },
+    async set(key: string, value: BuildingRegisterInfo, ttl: number) {
+      memory.set(key, { value, expiresAt: Date.now() + ttl * 1000 });
+    },
+  };
+
+  if (!process.env.VERCEL) return fallback;
+  try {
+    const mod = (await import('@vercel/functions')) as {
+      getCache?: (o?: { namespace?: string }) => {
+        get(k: string): Promise<unknown>;
+        set(k: string, v: unknown, o: { ttl: number; tags?: string[] }): Promise<void>;
+      };
+    };
+    if (typeof mod.getCache !== 'function') return fallback;
+    const c = mod.getCache({ namespace: 'building-register' });
+    return {
+      async get(key) {
+        try {
+          return ((await c.get(key)) as BuildingRegisterInfo | undefined) ?? undefined;
+        } catch {
+          return fallback.get(key);
+        }
+      },
+      async set(key, value, ttl) {
+        try {
+          await c.set(key, value, { ttl, tags: ['building-register'] });
+        } catch {
+          await fallback.set(key, value, ttl);
+        }
+      },
+    };
+  } catch {
+    return fallback;
   }
 }
 

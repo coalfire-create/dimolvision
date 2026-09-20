@@ -11,8 +11,15 @@ import {
 import { HeuristicVolumeEstimator } from './estimation/provider.js';
 import { createSiteAnalysisRouter } from './routes/site-analysis.js';
 import { env, activeVisionProvider } from './config/env.js';
-import { BuildingRegisterClient } from './public-data/building-register.js';
-import { createAnalysisCache, type AnalysisCacheStore } from './cache/analysis-cache.js';
+import {
+  BuildingRegisterClient,
+  type RegisterCacheStore,
+} from './public-data/building-register.js';
+import {
+  createAnalysisCache,
+  createRegisterCache,
+  type AnalysisCacheStore,
+} from './cache/analysis-cache.js';
 import { ReconstructionClient } from './recon/reconstruction.js';
 import { ParcelLookupClient } from './geo/parcel.js';
 
@@ -94,10 +101,25 @@ export function createApp() {
   });
 
   // 공공데이터 키가 있을 때만 건축물대장 보강을 켠다(없으면 사진만으로 분석).
+  //
+  // 대장 조회는 **반드시 성공해야 하는** 경로다. 연면적이 없으면 물량도 견적도 못 낸다.
+  // 그래서 재시도(3회)와 캐시를 함께 건다. 한 번 성공한 지번은 외부 호출 없이 응답한다.
+  let registerCachePromise: Promise<RegisterCacheStore> | undefined;
+  const registerCache: RegisterCacheStore = {
+    async get(key) {
+      registerCachePromise ??= createRegisterCache();
+      return (await registerCachePromise).get(key);
+    },
+    async set(key, value, ttl) {
+      registerCachePromise ??= createRegisterCache();
+      return (await registerCachePromise).set(key, value, ttl);
+    },
+  };
   const registry = env.publicData.serviceKey
     ? new BuildingRegisterClient({
         serviceKey: env.publicData.serviceKey,
         timeoutMs: env.publicData.timeoutMs,
+        cache: registerCache,
       })
     : undefined;
 

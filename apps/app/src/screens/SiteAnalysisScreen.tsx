@@ -607,6 +607,13 @@ export function SiteAnalysisScreen() {
                   </View>
                 ))}
               </View>
+            ) : parcel && result ? (
+              // 주소는 찍었는데 대장이 안 붙은 경우. 조용히 넘어가면 사용자는 왜 물량이
+              // 안 나오는지 모른다. 무엇을 해야 하는지 바로 알려준다.
+              <Text style={styles.regMiss}>
+                이 지번은 건축물대장을 찾지 못했습니다(나대지·무허가 건물일 수 있습니다).
+                아래에 연면적을 입력하면 물량과 공사비가 나옵니다.
+              </Text>
             ) : null}
             <PressableScale style={styles.addrBtn} onPress={openMap} accessibilityRole="button">
               <Text style={styles.addrBtnText}>
@@ -1635,6 +1642,15 @@ const styles = StyleSheet.create({
     paddingVertical: 5,
   },
   regChipText: { color: colors.primary, fontSize: 12, fontWeight: '700' },
+  regMiss: {
+    color: '#92400E',
+    backgroundColor: '#FFFBEB',
+    borderRadius: 10,
+    padding: spacing.sm,
+    fontSize: 12,
+    lineHeight: 18,
+    marginTop: spacing.sm,
+  },
   addrBtn: {
     marginTop: spacing.sm,
     alignItems: 'center',

@@ -182,6 +182,9 @@
             <li><b>옆으로 이동</b> — 벽을 따라 게걸음처럼 걸으며 촬영합니다</li>
             <li><b>한 바퀴 돌기</b> — 방이면 벽을 따라, 건물이면 외곽을 따라 크게 돕니다</li>
             <li><b>2~3m 거리 유지</b> — 너무 가까우면 화면이 급변해 이어지지 않습니다</li>
+            <li><b>좁은 통로·작은 방이면</b> — 옆으로 걸을 공간이 없으면 <b>통로를 따라 앞으로</b>
+              천천히 걸으세요. 카메라는 진행 방향을 보되 살짝(30~45°) 벽 쪽으로 틀면
+              벽면도 함께 담깁니다. 가까울수록 화면이 빨리 흐르니 더 천천히 걸으세요</li>
             <li><b>천천히</b> — 30~60초. 빠르게 훑으면 흔들려 특징점이 사라집니다</li>
             <li><b>무늬 있는 곳을 포함</b> — 민무늬 벽만 찍으면 맞출 기준점이 없습니다.
               가구·배관·바닥 패턴·창틀이 화면에 들어오게 하세요</li>
@@ -189,7 +192,7 @@
           <div class="ox">
             <div class="ok">
               <b>O 이렇게</b>
-              <div class="fig">🧍‍♂️→→→<br><span>벽을 보며 옆으로 걷기</span></div>
+              <div class="fig">🧍‍♂️→→→<br><span>옆으로 걷기<br>좁으면 앞으로 걷기</span></div>
             </div>
             <div class="no">
               <b>X 이렇게 하면 실패</b>
@@ -301,6 +304,9 @@ let CAPTURE_QUALITY = 0.58;
       // 완만한 실제 보행(깊이 비 1.7배 ≈ 0.25)도 통과하는 자리다.
       const PARALLAX_MIN_RATIO = 0.25;  // 전체 이동 대비 잔차 비율
       const PARALLAX_MIN_PX = 1.2;      // 정수 양자화 잡음(회전에서 1.0)과 구분되는 최소 잔차
+      // 앞으로 걷는 경우의 문턱. 좁은 통로에서는 옆으로 걸을 공간이 없어 이 경로로 찍는다.
+      // 화면이 거의 흐르지 않는 상태라 잡음 여지가 작아 낮게 잡아도 오탐이 나지 않는다.
+      const PARALLAX_FORWARD_PX = 0.8;
 
       /** 프레임을 판정용 그레이스케일 축소본으로. 원본을 들고 있으면 메모리가 터진다. */
       function toTiny(data, w, h) {
@@ -463,6 +469,30 @@ let CAPTURE_QUALITY = 0.58;
         };
       }
 
+      /**
+       * 한 쌍의 촬영 상태를 가른다. 라이브 코칭과 업로드 검사가 같은 규칙을 쓴다.
+       *
+       * 좁은 통로에서 중요한 지점: 옆으로 걸을 공간이 없으면 통로를 따라 **앞으로** 걷는다.
+       * 앞으로 가면 화면 흐름이 중심에서 바깥으로 퍼지는 모양이라 서로 상쇄돼
+       * "전체 이동량" 이 거의 0 으로 나온다. 그걸 STILL 로 판정하면 제대로 걷고 있는데도
+       * "움직이세요" 가 뜨고 프레임이 하나도 쌓이지 않는다.
+       *
+       * 그래서 **잔차(parallax)를 먼저 본다**. 잔차가 크다는 건 가까운 것과 먼 것이 다르게
+       * 움직였다는 뜻이고, 그건 카메라가 실제로 이동했다는 증거다 — 옆으로든 앞으로든.
+       */
+      function classify(m) {
+        if (m.blocks < 4) return 'FLAT';
+        // 측정이 포화되면 판정 자체를 믿을 수 없다.
+        if (m.saturated || m.motion > LIVE.FAST) return 'FAST';
+        // 앞으로 걷기: 전체 이동이 거의 없는데 잔차가 있다.
+        // 이 경우 잡음이 끼어들 여지가 작다 — 화면이 거의 안 흐르면 블록 매칭이 정확해
+        // 잔차가 0 에 붙기 때문이다(제자리 회전 실측 잔차 0.00). 그래서 문턱을 낮춰 잡는다.
+        if (m.motion < 1.0) return m.parallax >= PARALLAX_FORWARD_PX ? 'GOOD' : 'STILL';
+        // 옆으로 걷기: 전체 이동도 크고 잔차도 커야 한다.
+        if (m.parallax >= PARALLAX_MIN_PX && m.ratio >= PARALLAX_MIN_RATIO) return 'GOOD';
+        return 'ROTATE';
+      }
+
       const median = (arr) => {
         if (arr.length === 0) return 0;
         const s = [...arr].sort((x, y) => x - y);
@@ -509,14 +539,16 @@ let CAPTURE_QUALITY = 0.58;
         let moving = 0, still = 0, rotating = 0, textureless = 0;
         const raw = [];
         for (const m of metrics) {
-          if (m.blocks < 4) { textureless++; continue; }
+          const key = classify(m);
+          if (key === 'FLAT') { textureless++; continue; }
           raw.push({
             motion: +m.motion.toFixed(2),
             parallax: +m.parallax.toFixed(2),
             ratio: +m.ratio.toFixed(3),
+            key,
           });
-          if (m.motion < 1.0) still++;
-          else if (m.ratio >= PARALLAX_MIN_RATIO && m.parallax >= PARALLAX_MIN_PX) moving++;
+          if (key === 'GOOD') moving++;
+          else if (key === 'STILL') still++;
           else rotating++;
         }
         window.__captureRaw = raw;
@@ -679,6 +711,7 @@ let CAPTURE_QUALITY = 0.58;
             '많이 넣어도 결과는 같습니다.',
           how: [
             '벽에서 <b>2~3m 떨어져</b> 벽을 바라본 채로 <b>옆으로 걸으세요</b>. 게걸음처럼.',
+            '좁아서 옆으로 못 걸으면 <b>통로를 따라 앞으로</b> 천천히 걸으세요. 그것도 시차가 됩니다.',
             '카메라는 벽을 향해 고정하고, <b>몸이 이동</b>해야 합니다. 손목으로 훑지 마세요.',
             '건물을 <b>한 바퀴 돌며</b> 30초 이상 찍으세요. 모서리에서도 멈추지 말고 계속 걸으세요.',
             '가구·배관·창틀처럼 무늬가 있는 것이 화면에 들어오게 하세요.',
@@ -689,6 +722,7 @@ let CAPTURE_QUALITY = 0.58;
           why: '한 자리에서 정지한 채로 찍으면 다른 시점이 없어 3D 를 만들 수 없습니다.',
           how: [
             '벽을 바라본 채 <b>옆으로 걸으며</b> 촬영하세요.',
+            '좁으면 <b>통로를 따라 앞으로</b> 걸어도 됩니다.',
             '30초 이상, 건물 한 면을 따라 끝까지 이동하세요.',
           ],
         },
@@ -922,8 +956,8 @@ let CAPTURE_QUALITY = 0.58;
 
       const COACH = {
         START:   { cls: '',     msg: '벽을 향해 카메라를 드세요', sub: '벽에서 2~3m 떨어져 주세요' },
-        STILL:   { cls: 'warn', msg: '움직이세요',               sub: '벽을 보며 옆으로 걸어야 합니다' },
-        ROTATE:  { cls: 'bad',  msg: '제자리에서 돌리지 마세요',   sub: '손목이 아니라 몸이 옆으로 이동해야 합니다' },
+        STILL:   { cls: 'warn', msg: '움직이세요',               sub: '옆으로 걷거나, 좁으면 통로를 따라 앞으로 걸으세요' },
+        ROTATE:  { cls: 'bad',  msg: '제자리에서 돌리지 마세요',   sub: '손목이 아니라 몸이 이동해야 합니다' },
         FAST:    { cls: 'warn', msg: '너무 빠릅니다',             sub: '흔들리면 맞출 기준점이 사라집니다' },
         FLAT:    { cls: 'warn', msg: '무늬가 없습니다',           sub: '가구·창틀·배관이 화면에 들어오게 하세요' },
         GOOD:    { cls: 'good', msg: '좋습니다 — 계속 걸으세요',   sub: '같은 속도로 벽을 따라 이동하세요' },
@@ -1028,12 +1062,7 @@ let CAPTURE_QUALITY = 0.58;
           if (!prev) return;
 
           const m = pairMetrics(prev, tiny);
-          let key;
-          if (m.blocks < 4) key = 'FLAT';
-          else if (m.motion < 1.0) key = 'STILL';
-          else if (m.saturated || m.motion > LIVE.FAST) key = 'FAST';
-          else if (m.ratio >= PARALLAX_MIN_RATIO && m.parallax >= PARALLAX_MIN_PX) key = 'GOOD';
-          else key = 'ROTATE';
+          const key = classify(m);
           window.__liveMetrics = m;
           st.history.push(key);
           const shown = smooth(st.history);

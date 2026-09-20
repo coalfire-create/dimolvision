@@ -59,6 +59,8 @@
       #stage { font-size: 13px; color: var(--muted); margin-top: 10px; min-height: 20px; }
       .bar { height: 6px; background: var(--border); border-radius: 3px; overflow: hidden; margin-top: 8px; }
       .bar i { display: block; height: 100%; width: 0; background: var(--primary); transition: width .25s; }
+      .scaleEdit { margin-top: 12px; border-top: 1px solid var(--line, #e2e8f0); padding-top: 12px; }
+      .scaleEdit summary { cursor: pointer; color: var(--muted); font-size: 13px; font-weight: 700; }
       #viewer { position: relative; width: 100%; aspect-ratio: 4/3; background: #0f172a; border-radius: 12px; overflow: hidden; touch-action: none; }
       /* 확대·축소. 휠이 없는 휴대폰에서도 눈에 보이는 조작이 있어야 한다. */
       .zoom { position: absolute; right: 10px; bottom: 10px; display: flex; flex-direction: column; gap: 6px; z-index: 2; }
@@ -259,29 +261,36 @@
       </div>
 
       <div id="scaleCard" class="card hidden">
-        <h2>3. 크기 기준 (자동)</h2>
+        <h2>3. 실측 치수</h2>
         <p class="sub">
-          영상으로 만든 3D 는 <b>형상은 알아도 크기는 모릅니다</b>. 같은 모양이 1m 일 수도
-          10m 일 수도 있기 때문입니다. 그래서 <b>표준 실내 문 높이 2,100mm</b> 를 기준으로
-          자동 환산합니다(건축물대장에서 그 건물의 실제 층고를 받았으면 그쪽을 씁니다).
-          아래에서 바꿀 수 있지만, 바꾸지 않아도 견적까지 그대로 진행됩니다.
+          영상으로 만든 3D 는 형상은 알아도 크기는 모릅니다. 그래서 아는 길이 하나를
+          곱해 미터로 옮깁니다 — <b>건축물대장에 적힌 그 건물의 실제 층고</b>를 씁니다.
+          대장을 못 받았을 때만 표준 실내 문 높이 2,100mm 로 대신합니다.
         </p>
-        <div id="presets" class="presets"></div>
-        <div class="row">
-          <div class="field">
-            <label for="axis">기준으로 쓸 방향</label>
-            <select id="axis">
-              <option value="shortest">가장 짧은 방향 (보통 높이)</option>
-              <option value="longest">가장 긴 방향 (보통 가로 폭)</option>
-              <option value="diagonal">대각선</option>
-            </select>
-          </div>
-          <div class="field">
-            <label for="meters">그 방향의 실제 길이 (m)</label>
-            <input id="meters" type="number" min="0.1" step="0.1" placeholder="예: 2.4" />
-          </div>
-        </div>
         <div id="scaleNote" class="note hidden"></div>
+        <!--
+          기준을 바꾸는 칸은 접어 둔다.
+          고르는 화면을 앞에 세우면 거기서 멈추는 사람이 생기고, 그러면 바닥면적
+          없이 견적으로 넘어간다. 기본값으로 결과를 먼저 내고, 고칠 사람만 편다.
+        -->
+        <details id="scaleEdit" class="scaleEdit">
+          <summary>기준 길이를 직접 고치기 (줄자로 잰 값이 있다면)</summary>
+          <div id="presets" class="presets"></div>
+          <div class="row">
+            <div class="field">
+              <label for="axis">기준으로 쓸 방향</label>
+              <select id="axis">
+                <option value="shortest">가장 짧은 방향 (보통 높이)</option>
+                <option value="longest">가장 긴 방향 (보통 가로 폭)</option>
+                <option value="diagonal">대각선</option>
+              </select>
+            </div>
+            <div class="field">
+              <label for="meters">그 방향의 실제 길이 (m)</label>
+              <input id="meters" type="number" min="0.1" step="0.1" placeholder="예: 2.4" />
+            </div>
+          </div>
+        </details>
         <a id="toAnalysis" class="hidden" href="/">이 면적으로 철거 견적 내기 →</a>
       </div>
 
@@ -1916,20 +1925,6 @@ let CAPTURE_QUALITY = 0.58;
           ['바닥면적', floor + '㎡'], ['부피', vol + '㎥'],
         ].map(([kk, v]) => `<div class="stat"><span>${kk}</span><b>${v}</b></div>`).join('');
 
-        const fromReg = registerInfo?.floorHeightM > 0
-          && Math.abs(meters - registerInfo.floorHeightM) < 0.01;
-        note.innerHTML =
-          (fromReg
-            ? `<b>건축물대장의 실제 층고(${registerInfo.floorHeightM}m)</b>로 자동 환산했습니다. `
-            : '') +
-          `${$('axis').selectedOptions[0].text} = ${meters}m 기준으로 환산했습니다 ` +
-          `(복원 1단위 = ${k.toFixed(3)}m). 기준이 어긋나면 <b>모든 치수가 같은 비율로</b> 어긋납니다. ` +
-          `줄자로 잰 값이 있으면 그걸 넣는 편이 정확합니다.` +
-          (warn.length
-            ? `<br><br><b>⚠ 이 수치는 믿기 어렵습니다.</b><br>· ${warn.join('<br>· ')}` +
-              `<br>견적을 내기 전에 기준 길이를 줄자로 잰 값으로 바꾸시길 권합니다.`
-            : '');
-
         // 잰 값이 말이 되는지 본다.
         //
         // 기준 길이 하나로 전체를 늘리는 방식이라, 기준이 어긋나거나 복원이
@@ -1951,6 +1946,20 @@ let CAPTURE_QUALITY = 0.58;
         if (h < 1.8 || h > 6) {
           warn.push(`높이 ${r1(h)}m 는 실내로 보기 어렵습니다. 기준으로 쓴 길이가 맞는지 확인하세요.`);
         }
+
+        const fromReg = registerInfo?.floorHeightM > 0
+          && Math.abs(meters - registerInfo.floorHeightM) < 0.01;
+        note.innerHTML =
+          (fromReg
+            ? `<b>건축물대장의 실제 층고(${registerInfo.floorHeightM}m)</b>로 자동 환산했습니다. `
+            : '') +
+          `${$('axis').selectedOptions[0].text} = ${meters}m 기준으로 환산했습니다 ` +
+          `(복원 1단위 = ${k.toFixed(3)}m). 기준이 어긋나면 <b>모든 치수가 같은 비율로</b> 어긋납니다. ` +
+          `줄자로 잰 값이 있으면 그걸 넣는 편이 정확합니다.` +
+          (warn.length
+            ? `<br><br><b>⚠ 이 수치는 믿기 어렵습니다.</b><br>· ${warn.join('<br>· ')}` +
+              `<br>견적을 내기 전에 기준 길이를 줄자로 잰 값으로 바꾸시길 권합니다.`
+            : '');
 
         // 잰 바닥면적을 그대로 분석 화면으로 넘긴다 — 여기서 견적으로 이어진다.
         lastFloorAreaM2 = floor;

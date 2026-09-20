@@ -482,6 +482,22 @@ export function SiteAnalysisScreen() {
     openInternal('/map.html');
   }
 
+  /**
+   * 3D 촬영 화면. 주소를 이미 골랐으면 지번을 함께 넘긴다 —
+   * 3D 페이지가 그 건물의 실제 층고를 대장에서 받아 크기 기준을 자동으로 정한다.
+   * 안 넘기면 사용자가 "층고 2.4m" 같은 표준값을 추측해 골라야 한다.
+   */
+  function reconUrl(): string {
+    if (!parcel) return '/recon.html';
+    const q = new URLSearchParams({
+      sigunguCd: parcel.sigunguCd,
+      bjdongCd: parcel.bjdongCd,
+      bun: parcel.bun,
+      ji: parcel.ji,
+    });
+    return `/recon.html?${q.toString()}`;
+  }
+
   return (
     <View style={styles.screen}>
       <ScreenHeader title="철거 현장 사진 분석" canGoBack />
@@ -632,7 +648,7 @@ export function SiteAnalysisScreen() {
         <FadeInUp delay={100}>
           <PressableScale
             style={styles.videoCard}
-            onPress={() => openInternal('/recon.html')}
+            onPress={() => openInternal(reconUrl())}
             accessibilityRole="button"
           >
             <View style={styles.videoBadge}>

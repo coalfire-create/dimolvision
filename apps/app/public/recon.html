@@ -1248,6 +1248,9 @@ let CAPTURE_QUALITY = 0.58;
       if (!navigator.mediaDevices?.getUserMedia) setMode(false);
       else setMode(true);
 
+      // 지도에서 넘어왔으면 대장을 미리 받아 둔다(복원이 끝나면 바로 쓰려고).
+      void loadRegisterFromUrl();
+
       $('file').addEventListener('change', e => {
         if (e.target.files[0]) warmupGpu();
         picked = e.target.files[0] || null;
@@ -1266,6 +1269,30 @@ let CAPTURE_QUALITY = 0.58;
         $('error').classList.remove('hidden');
       }
 
+      /**
+       * 지도에서 찍은 지번을 이어받아 그 건물의 **실제 층고**를 가져온다.
+       *
+       * 크기 기준을 사용자가 고르게 하면(층고 2.4m 같은 프리셋) 추측이 섞인다.
+       * 건축물대장은 그 건물의 높이와 층수를 알고 있으니 나눠서 층고를 얻을 수 있다
+       * (실측: 마포구 연남동 MH빌딩 높이 16.6m ÷ 지상 5층 = 3.32m).
+       * 추측한 표준값보다 그 건물의 실제 값이 언제나 낫다.
+       */
+      let registerInfo = null;
+
+      async function loadRegisterFromUrl() {
+        const q = new URLSearchParams(location.search);
+        const sg = q.get('sigunguCd'), bj = q.get('bjdongCd');
+        if (!/^\d{5}$/.test(sg ?? '') || !/^\d{5}$/.test(bj ?? '')) return;
+        try {
+          const p = new URLSearchParams({ sigunguCd: sg, bjdongCd: bj });
+          if (q.get('bun')) p.set('bun', q.get('bun'));
+          if (q.get('ji')) p.set('ji', q.get('ji'));
+          const r = await fetch(`/api/building/register?${p}`);
+          if (!r.ok) return;
+          registerInfo = await r.json();
+        } catch { /* 없으면 프리셋으로 간다 */ }
+      }
+
       // ── 크기 환산 ────────────────────────────────────────────────────
       // 복원 좌표계는 단위가 없다. 기준 길이 하나를 곱해 전체를 미터로 옮긴다.
       // 서버를 다시 부르지 않으므로 기준을 바꾸면 즉시 반영된다 — 여러 기준을
@@ -1280,6 +1307,17 @@ let CAPTURE_QUALITY = 0.58;
       ];
 
       function renderPresets() {
+        // 대장에서 실제 층고를 받았으면 맨 앞에 놓고 기본 선택한다.
+        if (registerInfo?.floorHeightM > 0 && !PRESETS.some((p) => p.fromRegister)) {
+          PRESETS.unshift({
+            label: `${registerInfo.buildingName || '이 건물'} 실제 층고`,
+            m: registerInfo.floorHeightM,
+            axis: 'shortest',
+            hint: `건축물대장 · 높이 ${registerInfo.heightM}m ÷ ${
+              Math.round(registerInfo.heightM / registerInfo.floorHeightM)}층`,
+            fromRegister: true,
+          });
+        }
         $('presets').innerHTML = PRESETS.map((p, i) =>
           `<button type="button" class="preset" data-i="${i}">` +
           `<b>${p.label} ${p.m}m</b><span>${p.hint}</span></button>`).join('');
@@ -1334,7 +1372,12 @@ let CAPTURE_QUALITY = 0.58;
           ['바닥면적', floor + '㎡'], ['부피', vol + '㎥'],
         ].map(([kk, v]) => `<div class="stat"><span>${kk}</span><b>${v}</b></div>`).join('');
 
+        const fromReg = registerInfo?.floorHeightM > 0
+          && Math.abs(meters - registerInfo.floorHeightM) < 0.01;
         note.innerHTML =
+          (fromReg
+            ? `<b>건축물대장의 실제 층고(${registerInfo.floorHeightM}m)</b>로 자동 환산했습니다. `
+            : '') +
           `${$('axis').selectedOptions[0].text} = ${meters}m 기준으로 환산했습니다 ` +
           `(복원 1단위 = ${k.toFixed(3)}m). 기준이 어긋나면 <b>모든 치수가 같은 비율로</b> 어긋납니다. ` +
           `줄자로 잰 값이 있으면 그걸 넣는 편이 정확합니다.`;
@@ -1436,6 +1479,13 @@ let CAPTURE_QUALITY = 0.58;
           lastExtent = data.extent;
           lastStats = { reg: data.registeredImages, pts: data.pointCount, sec: data.elapsedSec };
           $('scaleCard').classList.remove('hidden');
+          renderPresets();
+          // 대장 층고를 알면 사용자가 고르기 전에 이미 치수가 떠 있어야 한다.
+          if (registerInfo?.floorHeightM > 0) {
+            $('axis').value = 'shortest';
+            $('meters').value = registerInfo.floorHeightM;
+            $('presets').querySelector('.preset')?.classList.add('on');
+          }
           renderScaled();
         } catch (e) {
           showError(e.message || '복원 중 문제가 발생했습니다.');

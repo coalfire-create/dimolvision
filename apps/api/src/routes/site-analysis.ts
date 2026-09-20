@@ -402,6 +402,37 @@ export function createSiteAnalysisRouter(
   });
 
   /**
+   * GET /api/building/register?sigunguCd=&bjdongCd=&bun=&ji=
+   *
+   * 지번으로 건축물대장을 바로 조회한다. 3D 페이지가 사진 분석을 거치지 않고
+   * 층고만 받아가야 해서 별도 경로가 필요하다 — 크기 기준을 사용자가 고르는 대신
+   * 그 건물의 실제 높이에서 자동으로 정하기 위해서다.
+   */
+  router.get('/building/register', async (req, res) => {
+    if (!registry) {
+      res.status(503).json({ error: '건축물대장 조회가 설정되지 않았습니다.' });
+      return;
+    }
+    const q = req.query as Record<string, string | undefined>;
+    if (!q.sigunguCd || !q.bjdongCd) {
+      res.status(400).json({ error: 'sigunguCd 와 bjdongCd 가 필요합니다.' });
+      return;
+    }
+    const info = await registry.lookup({
+      sigunguCd: q.sigunguCd,
+      bjdongCd: q.bjdongCd,
+      ...(q.bun ? { bun: q.bun } : {}),
+      ...(q.ji ? { ji: q.ji } : {}),
+      ...(q.platGbCd ? { platGbCd: q.platGbCd } : {}),
+    });
+    if (!info) {
+      res.status(404).json({ error: '이 지번의 건축물대장을 찾지 못했습니다.' });
+      return;
+    }
+    res.json(info);
+  });
+
+  /**
    * GET /api/geo/parcel?lat=&lng=
    * 지도에서 찍은 좌표를 건축물대장 조회용 지번 코드로 옮긴다.
    */

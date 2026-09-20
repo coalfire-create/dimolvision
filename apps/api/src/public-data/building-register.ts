@@ -29,6 +29,16 @@ export interface BuildingRegisterInfo {
   mainUse?: string;
   /** 건물명(있을 때). */
   buildingName?: string;
+  /** 건물 전체 높이(m). 층고 계산에 쓴다. */
+  heightM?: number;
+  /**
+   * 층고(m) = 높이 ÷ 지상층수.
+   *
+   * 3D 복원 좌표계는 단위가 없어 사용자가 기준 길이를 골라야 했다("층고 2.4m" 같은
+   * 프리셋). 그런데 대장이 실제 높이와 층수를 알고 있으니 그걸로 자동 결정할 수 있다.
+   * 추측한 표준값보다 그 건물의 실제 값이 언제나 낫다.
+   */
+  floorHeightM?: number;
 }
 
 export interface BuildingRegisterQuery {
@@ -203,6 +213,7 @@ export class BuildingRegisterClient {
         approvedYear: parseApprovedYear(best.useAprDay),
         mainUse: best.mainPurpsCdNm?.trim() || undefined,
         buildingName: best.bldNm?.trim() || undefined,
+        ...buildHeights(num(best.heit), num(best.grndFlrCnt)),
       };
       // 연면적이 없으면 물량·견적에 쓸 수 없다 — 다른 대장 종류를 더 본다.
       if (!info.totalFloorAreaM2) return { kind: 'empty' };
@@ -215,9 +226,29 @@ export class BuildingRegisterClient {
   }
 }
 
+/**
+ * 높이·층수 → 층고. 값이 터무니없으면 버린다.
+ * 실내 층고는 아무리 낮아도 2m, 아무리 높아도 공장 기준 8m 를 넘지 않는다.
+ * 대장에 0 이나 오기가 들어 있는 경우가 실제로 있어 그대로 쓰면 치수가 통째로 어긋난다.
+ */
+function buildHeights(heit: number, floors: number): {
+  heightM?: number;
+  floorHeightM?: number;
+} {
+  if (!(heit > 0)) return {};
+  const out: { heightM?: number; floorHeightM?: number } = { heightM: heit };
+  if (floors > 0) {
+    const fh = heit / floors;
+    if (fh >= 2 && fh <= 8) out.floorHeightM = Math.round(fh * 100) / 100;
+  }
+  return out;
+}
+
 /** 표제부 응답에서 쓰는 필드만. 공공데이터는 값이 문자열로 온다. */
 interface BrTitleItem {
   strctCdNm?: string;
+  /** 건물 높이(m). 대장에 없을 수도 있다. */
+  heit?: string | number;
   totArea?: string | number;
   grndFlrCnt?: string | number;
   useAprDay?: string;

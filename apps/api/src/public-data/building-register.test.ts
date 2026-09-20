@@ -214,3 +214,38 @@ describe('BuildingRegisterClient — 무조건 값을 내야 한다', () => {
     expect(await client().lookup(q)).toBeUndefined();
   });
 });
+
+describe('층고 — 3D 크기 기준을 대장에서 자동으로', () => {
+  afterEach(() => vi.unstubAllGlobals());
+  const respond = (item: Record<string, unknown>) =>
+    vi.fn(async () => ({
+      ok: true,
+      text: async () =>
+        JSON.stringify({ response: { header: { resultCode: '00' }, body: { items: { item } } } }),
+    }));
+  const c = () =>
+    new BuildingRegisterClient({ serviceKey: 'k', timeoutMs: 3000, baseUrl: 'https://x', retryDelayMs: 0 });
+
+  it('높이 ÷ 지상층수로 층고를 낸다', async () => {
+    // 실제 대장 값(마포구 연남동 MH빌딩): 높이 16.6m · 지상 5층 → 3.32m
+    vi.stubGlobal('fetch', respond({ totArea: '577.5', heit: '16.6', grndFlrCnt: '5' }));
+    const r = await c().lookup({ sigunguCd: '11440', bjdongCd: '12400' });
+    expect(r?.heightM).toBe(16.6);
+    expect(r?.floorHeightM).toBe(3.32);
+  });
+
+  it('말이 안 되는 층고는 버린다 — 틀린 기준은 치수를 통째로 어긋나게 한다', async () => {
+    // 높이 0.5m, 또는 한 층에 20m 같은 값이 대장에 실제로 들어 있다.
+    vi.stubGlobal('fetch', respond({ totArea: '100', heit: '0.5', grndFlrCnt: '1' }));
+    expect((await c().lookup({ sigunguCd: '1', bjdongCd: '2' }))?.floorHeightM).toBeUndefined();
+    vi.stubGlobal('fetch', respond({ totArea: '100', heit: '20', grndFlrCnt: '1' }));
+    expect((await c().lookup({ sigunguCd: '1', bjdongCd: '2' }))?.floorHeightM).toBeUndefined();
+  });
+
+  it('높이가 없으면 조용히 비운다 — 분석은 그대로 진행된다', async () => {
+    vi.stubGlobal('fetch', respond({ totArea: '100', grndFlrCnt: '2' }));
+    const r = await c().lookup({ sigunguCd: '1', bjdongCd: '2' });
+    expect(r?.totalFloorAreaM2).toBe(100);
+    expect(r?.floorHeightM).toBeUndefined();
+  });
+});

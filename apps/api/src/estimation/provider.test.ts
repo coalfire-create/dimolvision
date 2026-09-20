@@ -1,6 +1,7 @@
 import {
   DEMOLITION_TON_PER_M2,
   ESTIMATE_RANGE_RATIO,
+  ESTIMATE_RANGE_RATIO_MEASURED,
   STRUCTURE_FACTORS,
   m2ToPyeong,
   pyeongToM2,
@@ -37,9 +38,9 @@ describe('HeuristicVolumeEstimator — 원단위 물량 추정 (AI 연동 전 �
   it('연면적 누락·0 이하·잘못된 구조 거부', async () => {
     expect(() => estimator.estimate({})).toThrow(EstimationValidationError);
     expect(() => estimator.estimate({ floorAreaM2: 0 })).toThrow(EstimationValidationError);
-    expect(() =>
-      estimator.estimate({ floorAreaM2: 10, structure: 'STEEL' as never }),
-    ).toThrow(EstimationValidationError);
+    expect(() => estimator.estimate({ floorAreaM2: 10, structure: 'STEEL' as never })).toThrow(
+      EstimationValidationError,
+    );
   });
 
   describe('층수(floors)', () => {
@@ -47,9 +48,7 @@ describe('HeuristicVolumeEstimator — 원단위 물량 추정 (AI 연동 전 �
       const oneFloor = await estimator.estimate({ floorAreaM2: 100 });
       const threeFloors = await estimator.estimate({ floorAreaM2: 100, floors: 3 });
       expect(threeFloors.floorAreaM2).toBe(300);
-      expect(threeFloors.estimatedTons).toBe(
-        Math.round(oneFloor.estimatedTons * 3 * 10) / 10,
-      );
+      expect(threeFloors.estimatedTons).toBe(Math.round(oneFloor.estimatedTons * 3 * 10) / 10);
     });
 
     it('층수 미지정은 1층과 동일(연면적 그대로)', async () => {
@@ -97,6 +96,50 @@ describe('HeuristicVolumeEstimator — 원단위 물량 추정 (AI 연동 전 �
       const r = await estimator.estimate({ floorAreaM2: 100 });
       expect(r.rangeMinTons).toBeCloseTo(r.estimatedTons * (1 - ESTIMATE_RANGE_RATIO), 1);
       expect(r.rangeMaxTons).toBeCloseTo(r.estimatedTons * (1 + ESTIMATE_RANGE_RATIO), 1);
+    });
+  });
+
+  describe('방 단위 실측(measured) — 부분 철거', () => {
+    it('measured 이면 method 가 ROOM_MEASUREMENT 다', async () => {
+      const r = await estimator.estimate({ floorAreaM2: 30, measured: true });
+      expect(r.method).toBe('ROOM_MEASUREMENT');
+      expect(r.floorAreaM2).toBe(30);
+    });
+
+    it('measured 는 floors 를 무시한다 — 실측 합계가 이미 전체 범위다', async () => {
+      const r = await estimator.estimate({ floorAreaM2: 30, floors: 3, measured: true });
+      expect(r.floorAreaM2).toBe(30);
+    });
+
+    it('measured 는 원단위 휴리스틱과 같은 톤수를 내지만 범위는 더 좁다', async () => {
+      const heuristic = await estimator.estimate({ floorAreaM2: 30 });
+      const measured = await estimator.estimate({ floorAreaM2: 30, measured: true });
+      expect(measured.estimatedTons).toBe(heuristic.estimatedTons);
+      const heuristicWidth = heuristic.rangeMaxTons - heuristic.rangeMinTons;
+      const measuredWidth = measured.rangeMaxTons - measured.rangeMinTons;
+      expect(measuredWidth).toBeLessThan(heuristicWidth);
+      expect(measured.rangeMinTons).toBeCloseTo(
+        measured.estimatedTons * (1 - ESTIMATE_RANGE_RATIO_MEASURED),
+        1,
+      );
+    });
+
+    it('신뢰도: 실측+구조 확정이면 HIGH, 하나만 있으면 MEDIUM, 둘 다 없으면 LOW', async () => {
+      const both = await estimator.estimate({ floorAreaM2: 30, structure: 'RC', measured: true });
+      const onlyMeasured = await estimator.estimate({ floorAreaM2: 30, measured: true });
+      const onlyStructure = await estimator.estimate({ floorAreaM2: 30, structure: 'RC' });
+      const neither = await estimator.estimate({ floorAreaM2: 30 });
+      expect(both.confidence).toBe('HIGH');
+      expect(onlyMeasured.confidence).toBe('MEDIUM');
+      expect(onlyStructure.confidence).toBe('MEDIUM');
+      expect(neither.confidence).toBe('LOW');
+    });
+
+    it('measured 가 아니면 여전히 기존 동작(AREA_HEURISTIC, 기본 범위)', async () => {
+      const r = await estimator.estimate({ floorAreaM2: 30, structure: 'RC' });
+      expect(r.method).toBe('AREA_HEURISTIC');
+      const width = r.rangeMaxTons - r.rangeMinTons;
+      expect(width).toBeCloseTo(r.estimatedTons * ESTIMATE_RANGE_RATIO, 1);
     });
   });
 

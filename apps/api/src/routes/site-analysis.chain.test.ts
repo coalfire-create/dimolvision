@@ -8,9 +8,32 @@ import {
   type AnalyzeSiteInput,
   type SiteAnalyzer,
 } from '../site-analysis/analyzer.js';
+import { HeuristicVolumeEstimator } from '../estimation/provider.js';
 import { createSiteAnalysisRouter } from './site-analysis.js';
 
 const IMG = 'A'.repeat(200);
+
+/** waste-items 엔드포인트로 요청을 보낸다(analyze 와 estimator 를 함께 붙여야 물량 추정이 나온다). */
+async function postWasteItems(chain: SiteAnalyzer[], body: unknown) {
+  const app = express();
+  app.use(express.json({ limit: '5mb' }));
+  app.use(
+    '/api',
+    createSiteAnalysisRouter(chain, new HeuristicVolumeEstimator(), { attemptsPerAnalyzer: 1 }),
+  );
+  const server = app.listen(0);
+  const port = (server.address() as { port: number }).port;
+  try {
+    const res = await fetch(`http://127.0.0.1:${port}/api/site-analysis/waste-items`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    return { status: res.status, body: (await res.json()) as Record<string, unknown> };
+  } finally {
+    server.close();
+  }
+}
 
 /** 가짜 분석기. failTimes 만큼 실패한 뒤 성공한다('fail' 은 항상 실패). */
 function analyzer(
@@ -23,7 +46,16 @@ function analyzer(
       a.calls += 1;
       if (behavior === 'fail') throw new Error('upstream 503');
       if (typeof behavior === 'number' && a.calls <= behavior) throw new Error('upstream 429');
-      return { summary, materials: [], demolitionSteps: [], hazards: [], method: 'AI_VISION', confidence: 'MEDIUM', disclaimer: 'd', analyzedAt: new Date().toISOString() };
+      return {
+        summary,
+        materials: [],
+        demolitionSteps: [],
+        hazards: [],
+        method: 'AI_VISION',
+        confidence: 'MEDIUM',
+        disclaimer: 'd',
+        analyzedAt: new Date().toISOString(),
+      };
     },
   };
   return a;
@@ -33,7 +65,10 @@ function analyzer(
 async function post(chain: SiteAnalyzer[], body: unknown, attemptsPerAnalyzer = 1) {
   const app = express();
   app.use(express.json({ limit: '5mb' }));
-  app.use('/api', createSiteAnalysisRouter(chain, undefined, { attemptsPerAnalyzer, retryDelayMs: 1 }));
+  app.use(
+    '/api',
+    createSiteAnalysisRouter(chain, undefined, { attemptsPerAnalyzer, retryDelayMs: 1 }),
+  );
   const server = app.listen(0);
   const port = (server.address() as { port: number }).port;
   try {
@@ -131,11 +166,108 @@ describe('분석기 체인 폴백', () => {
       async analyze() {
         calls += 1;
         if (calls === 1) throw new VisionProviderError('gemini 503', 503);
-        return { summary: '재시도로 성공', materials: [], demolitionSteps: [], hazards: [], method: 'AI_VISION', confidence: 'MEDIUM', disclaimer: 'd', analyzedAt: new Date().toISOString() };
+        return {
+          summary: '재시도로 성공',
+          materials: [],
+          demolitionSteps: [],
+          hazards: [],
+          method: 'AI_VISION',
+          confidence: 'MEDIUM',
+          disclaimer: 'd',
+          analyzedAt: new Date().toISOString(),
+        };
       },
     };
     const res = await post([flaky, new MockSiteAnalyzer()], { imageBase64: IMG }, 2);
     expect(calls).toBe(2);
     expect(res.body.summary).toBe('재시도로 성공');
+  });
+});
+
+/** 성공을 돌려주는 간단한 분석기 — rooms 우선순위 테스트에서 재사용. */
+function okAnalyzer(): SiteAnalyzer {
+  return {
+    async analyze() {
+      return {
+        summary: 'ok',
+        materials: [],
+        demolitionSteps: [],
+        hazards: [],
+        method: 'AI_VISION',
+        confidence: 'MEDIUM',
+        disclaimer: 'd',
+        analyzedAt: new Date().toISOString(),
+      };
+    },
+  };
+}
+
+describe('방 단위 실측(rooms) — 부분 철거', () => {
+  it('/analyze: rooms 합계를 AI 힌트(totalFloorAreaM2)로 덮어쓴다', async () => {
+    let received: AnalyzeSiteInput | undefined;
+    const capture: SiteAnalyzer = {
+      async analyze(input) {
+        received = input;
+        return {
+          summary: 'ok',
+          materials: [],
+          demolitionSteps: [],
+          hazards: [],
+          method: 'AI_VISION',
+          confidence: 'MEDIUM',
+          disclaimer: 'd',
+          analyzedAt: new Date().toISOString(),
+        };
+      },
+    };
+    await post([capture], {
+      imageBase64: IMG,
+      floorAreaM2: 999, // rooms 가 있으면 이 값은 무시돼야 한다
+      rooms: [
+        { name: '거실', lengthM: 5, widthM: 4 },
+        { name: '방1', lengthM: 3, widthM: 3 },
+      ],
+    });
+    expect(received?.totalFloorAreaM2).toBe(29); // 20 + 9
+  });
+
+  it('/waste-items: rooms 가 floorAreaM2·floors 보다 우선하고 method 가 ROOM_MEASUREMENT 다', async () => {
+    const res = await postWasteItems([okAnalyzer()], {
+      imageBase64: IMG,
+      floorAreaM2: 999,
+      floors: 3,
+      rooms: [
+        { name: '거실', lengthM: 5, widthM: 4 },
+        { name: '방1', lengthM: 3, widthM: 3 },
+      ],
+    });
+    const estimate = res.body.estimate as { method: string; floorAreaM2: number } | undefined;
+    expect(estimate?.method).toBe('ROOM_MEASUREMENT');
+    expect(estimate?.floorAreaM2).toBe(29);
+    expect(res.body.roomsAreaM2).toBe(29);
+  });
+
+  it('/waste-items: 방 실측이 없으면 기존처럼 floorAreaM2×floors 를 쓴다', async () => {
+    const res = await postWasteItems([okAnalyzer()], {
+      imageBase64: IMG,
+      floorAreaM2: 20,
+      floors: 2,
+    });
+    const estimate = res.body.estimate as { method: string; floorAreaM2: number } | undefined;
+    expect(estimate?.method).toBe('AREA_HEURISTIC');
+    expect(estimate?.floorAreaM2).toBe(40);
+    expect(res.body.rooms).toBeUndefined();
+  });
+
+  it('길이·폭이 없는 방은 걸러지고, 남는 방이 없으면 rooms 자체가 무시된다', async () => {
+    const res = await postWasteItems([okAnalyzer()], {
+      imageBase64: IMG,
+      floorAreaM2: 20,
+      rooms: [{ name: '방', lengthM: -1, widthM: 3 }],
+    });
+    const estimate = res.body.estimate as { method: string; floorAreaM2: number } | undefined;
+    expect(estimate?.method).toBe('AREA_HEURISTIC');
+    expect(estimate?.floorAreaM2).toBe(20);
+    expect(res.body.rooms).toBeUndefined();
   });
 });

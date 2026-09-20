@@ -2,6 +2,7 @@ import { Platform } from 'react-native';
 import type {
   BuildingStructure,
   CostEstimate,
+  RoomMeasurement,
   SiteAnalysis,
   VolumeEstimate,
   WasteItem,
@@ -14,11 +15,9 @@ import type {
 const isWeb = Platform.OS === 'web';
 
 /** 운영 백엔드(디몰비전 API). 배포 시 EXPO_PUBLIC_API_BASE_URL 로 오버라이드. */
-const PROD_API_BASE_URL =
-  process.env.EXPO_PUBLIC_API_BASE_URL ?? 'http://localhost:8080/api';
+const PROD_API_BASE_URL = process.env.EXPO_PUBLIC_API_BASE_URL ?? 'http://localhost:8080/api';
 
-export const API_BASE_URL =
-  isWeb && !__DEV__ ? '/api' : PROD_API_BASE_URL;
+export const API_BASE_URL = isWeb && !__DEV__ ? '/api' : PROD_API_BASE_URL;
 
 export class ApiError extends Error {
   constructor(
@@ -69,6 +68,8 @@ export const analyzeSite = (input: {
   bjdongCd?: string;
   bun?: string;
   ji?: string;
+  /** 방 단위 실측(부분 철거). 있으면 연면적 힌트보다 우선한다. */
+  rooms?: RoomMeasurement[];
 }) => api<SiteAnalysis>('/site-analysis/analyze', { method: 'POST', body: JSON.stringify(input) });
 
 /** 건축물대장 조회 결과(주소 코드를 보냈을 때만 온다). */
@@ -92,6 +93,9 @@ export interface PhotoWasteItemsResult {
    * 처리비·운반비·인건비·장비비와 간접비를 항목별로, 각각 하한~상한 범위로 준다.
    */
   cost?: CostEstimate;
+  /** rooms 를 보냈을 때만 온다 — 서버가 실제로 계산에 쓴 방 목록·합계 면적(검산용). */
+  rooms?: RoomMeasurement[];
+  roomsAreaM2?: number;
 }
 
 export const analyzeSiteWasteItems = (input: {
@@ -114,6 +118,11 @@ export const analyzeSiteWasteItems = (input: {
   ji?: string;
   /** 처리장까지 운반거리(km). 없으면 30km 기준으로 계산한다. */
   distanceKm?: number;
+  /**
+   * 방 단위 실측(부분 철거용). 있으면 floorAreaM2/floors·건축물대장 연면적보다
+   * 우선해서 물량 산정에 쓴다 — 건물 일부만 철거할 때 건물 전체 연면적은 틀린 값이다.
+   */
+  rooms?: RoomMeasurement[];
 }) =>
   api<PhotoWasteItemsResult>('/site-analysis/waste-items', {
     method: 'POST',

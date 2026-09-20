@@ -28,9 +28,9 @@ export const DEMOLITION_TON_PER_M2 = 1.58;
 
 /** 구조별 보정 계수 (환경부 건설폐기물 발생 원단위 기준). */
 export const STRUCTURE_FACTORS: Record<BuildingStructure, number> = {
-  RC: 1.0,      // 1.58 * 1.0 = 1.58 (철근콘크리트)
-  BRICK: 0.73,  // 1.58 * 0.73 ≈ 1.15 (조적조)
-  WOOD: 0.33,   // 1.58 * 0.33 ≈ 0.52 (목조)
+  RC: 1.0, // 1.58 * 1.0 = 1.58 (철근콘크리트)
+  BRICK: 0.73, // 1.58 * 0.73 ≈ 1.15 (조적조)
+  WOOD: 0.33, // 1.58 * 0.33 ≈ 0.52 (목조)
 };
 
 /** 1평 = 3.305785㎡ (한국 사용자는 평 단위로 면적을 인지한다). */
@@ -51,6 +51,42 @@ export function m2ToPyeong(m2: number): number {
  * 과도한 정밀도를 주장하지 않고 범위로 보여준다. 구조 정보가 있으면 절반으로 좁힌다.
  */
 export const ESTIMATE_RANGE_RATIO = 0.3;
+
+/**
+ * 방 단위 실측(rooms) 입력일 때의 범위 폭. 연면적을 건물 전체 평균으로 어림하는 게 아니라
+ * 줄자로 잰 값이라, 오차의 가장 큰 원인(면적 자체를 모르는 것)이 사라진다. 남는 편차는
+ * 원단위(㎡당 발생량) 자체의 현장 편차뿐이라 휴리스틱 기본 범위보다 좁게 잡는다.
+ */
+export const ESTIMATE_RANGE_RATIO_MEASURED = 0.15;
+
+/** 방 1개 실측 상한(㎡). 오타(예: 길이·폭에 cm를 m로 입력)로 비정상 값이 섞이지 않게 막는다. */
+export const MAX_ROOM_AREA_M2 = 500;
+
+/** 부분 철거 견적을 위한 방(공간) 단위 실측값 — 철거업체가 실사에서 줄자로 재는 값 그대로. */
+export interface RoomMeasurement {
+  /** 방 이름(예: '거실', '주방', '방1'). */
+  name: string;
+  /** 실측 길이(m). */
+  lengthM: number;
+  /** 실측 폭(m). */
+  widthM: number;
+}
+
+/**
+ * 방 목록의 실측 면적 합(㎡, 소수 1자리).
+ * 길이·폭이 양수가 아니거나 한 방이 {@link MAX_ROOM_AREA_M2}를 넘으면 그 방은 건너뛴다 —
+ * 오타 한 줄이 전체 견적을 부풀리는 것보다, 그 방만 빠지고 나머지가 맞는 편이 낫다.
+ */
+export function sumRoomAreaM2(rooms: readonly RoomMeasurement[]): number {
+  const total = rooms.reduce((sum, r) => {
+    if (!Number.isFinite(r.lengthM) || r.lengthM <= 0) return sum;
+    if (!Number.isFinite(r.widthM) || r.widthM <= 0) return sum;
+    const area = r.lengthM * r.widthM;
+    if (area > MAX_ROOM_AREA_M2) return sum;
+    return sum + area;
+  }, 0);
+  return Math.round(total * 10) / 10;
+}
 
 /** 운반 차량 정격 적재량(톤) — 대수 환산 안내용. */
 export const TRUCK_CAPACITY_TONS = [5, 25] as const;
@@ -77,8 +113,13 @@ export interface VolumeEstimate {
   /** 차량 대수 환산(참고). */
   truckLoads: TruckLoad[];
   confidence: EstimateConfidence;
-  /** 추정 방법 식별자 (AREA_HEURISTIC: 원단위, AI_VISION: 사진 분석 — 연동 후). */
-  method: 'AREA_HEURISTIC' | 'AI_VISION';
+  /**
+   * 추정 방법 식별자.
+   * AREA_HEURISTIC: 연면적(건물 전체 또는 사용자 입력) × 원단위.
+   * ROOM_MEASUREMENT: 방 단위 실측(rooms) 합계 × 원단위 — 면적 자체의 오차가 없다.
+   * AI_VISION: 사진 분석 — 연동 후.
+   */
+  method: 'AREA_HEURISTIC' | 'ROOM_MEASUREMENT' | 'AI_VISION';
   /** UI 필수 노출 문구 — 추정치의 한계 고지. */
   disclaimer: string;
   estimatedAt: string;

@@ -1,6 +1,7 @@
 import {
   DEMOLITION_TON_PER_M2,
   ESTIMATE_RANGE_RATIO,
+  ESTIMATE_RANGE_RATIO_MEASURED,
   STRUCTURE_FACTORS,
   toTruckLoads,
   type BuildingStructure,
@@ -28,6 +29,12 @@ export interface EstimateVolumeInput {
   /** 층수(선택, 1 이상 정수). 지정 시 floorAreaM2 × floors = 연면적. */
   floors?: number;
   structure?: BuildingStructure;
+  /**
+   * floorAreaM2 가 (건물 전체 원단위 어림이 아니라) 방 단위 실측 합계처럼 이미 확정된
+   * 값이면 true. 면적 자체의 불확실성이 없어지므로 추정 범위를 좁히고 신뢰도를 올린다.
+   * floors 는 무시한다 — 실측 합계는 이미 철거할 전체 범위다.
+   */
+  measured?: boolean;
   /** 현장 사진 키 — AI 비전 연동 시 사용. 목에서는 무시된다. */
   sitePhotoKeys?: string[];
 }
@@ -47,7 +54,9 @@ function round1(n: number): number {
 /** 원단위 휴리스틱 목 — 연면적 × 원단위 × 구조 보정. 결정적(같은 입력 → 같은 결과). */
 export class HeuristicVolumeEstimator implements VolumeEstimator {
   estimate(input: EstimateVolumeInput): Promise<VolumeEstimate> {
-    const { floorAreaM2, floors, structure } = input;
+    const { floorAreaM2, structure, measured } = input;
+    // 실측 합계는 이미 전체 범위이므로 층수를 곱하지 않는다(곱하면 방을 중복 계상한다).
+    const floors = measured ? undefined : input.floors;
     if (typeof floorAreaM2 !== 'number' || !Number.isFinite(floorAreaM2) || floorAreaM2 <= 0) {
       throw new EstimationValidationError(
         'floorAreaM2(연면적 ㎡, 양수)가 필요합니다. 사진만으로 추정하는 AI 분석은 준비중입니다.',
@@ -73,10 +82,14 @@ export class HeuristicVolumeEstimator implements VolumeEstimator {
     const factor = structure ? STRUCTURE_FACTORS[structure] : 1.0;
     const estimatedTons = round1(totalAreaM2 * DEMOLITION_TON_PER_M2 * factor);
 
-    // 구조 정보가 있으면 편차가 줄어드니 범위를 절반으로 좁힌다.
-    const ratio = structure ? ESTIMATE_RANGE_RATIO / 2 : ESTIMATE_RANGE_RATIO;
+    // 실측이면 면적 자체의 오차가 없으니 기본 범위보다 좁게, 구조 정보가 있으면 거기서 절반으로.
+    const baseRatio = measured ? ESTIMATE_RANGE_RATIO_MEASURED : ESTIMATE_RANGE_RATIO;
+    const ratio = structure ? baseRatio / 2 : baseRatio;
     const rangeMinTons = round1(estimatedTons * (1 - ratio));
     const rangeMaxTons = round1(estimatedTons * (1 + ratio));
+
+    // 신뢰도: 실측+구조 확정이 가장 높고(HIGH), 둘 중 하나만 있으면 MEDIUM, 둘 다 없으면 LOW.
+    const confidence = structure && measured ? 'HIGH' : structure || measured ? 'MEDIUM' : 'LOW';
 
     return Promise.resolve({
       estimatedTons,
@@ -84,9 +97,8 @@ export class HeuristicVolumeEstimator implements VolumeEstimator {
       rangeMaxTons,
       floorAreaM2: totalAreaM2,
       truckLoads: toTruckLoads(estimatedTons),
-      // 구조 정보가 있으면 보정이 들어가 신뢰도 한 단계 위.
-      confidence: structure ? 'MEDIUM' : 'LOW',
-      method: 'AREA_HEURISTIC',
+      confidence,
+      method: measured ? 'ROOM_MEASUREMENT' : 'AREA_HEURISTIC',
       disclaimer: DISCLAIMER,
       estimatedAt: new Date().toISOString(),
     });

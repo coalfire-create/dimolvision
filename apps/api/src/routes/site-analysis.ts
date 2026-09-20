@@ -3,7 +3,9 @@ import {
   estimateDemolitionCost,
   reconcileWasteByClass,
   siteAnalysisToWasteItems,
+  sumRoomAreaM2,
   type CostEstimate,
+  type RoomMeasurement,
   type SiteAnalysis,
   type VolumeEstimate,
 } from '@dimol/shared';
@@ -96,7 +98,8 @@ export function createSiteAnalysisRouter(
       mimeType: typeof body.mimeType === 'string' ? body.mimeType : undefined,
       images: images && images.length > 0 ? images : undefined,
       note: typeof body.note === 'string' ? body.note : undefined,
-      buildingStructure: typeof body.buildingStructure === 'string' ? body.buildingStructure : undefined,
+      buildingStructure:
+        typeof body.buildingStructure === 'string' ? body.buildingStructure : undefined,
       buildingYear: typeof body.buildingYear === 'number' ? body.buildingYear : undefined,
       buildingUse: typeof body.buildingUse === 'string' ? body.buildingUse : undefined,
       // 사용자가 연면적을 직접 입력한 경우에도 모델에게 규모를 알려 준다.
@@ -107,6 +110,28 @@ export function createSiteAnalysisRouter(
           ? body.floors
           : undefined,
     };
+  }
+
+  /**
+   * 방 단위 실측 입력(부분 철거용). 건축물대장 연면적은 건물 전체 기준이라, 인테리어
+   * 부분 철거처럼 대상 범위가 건물의 일부면 오히려 틀린 값이다. 반면 방 실측은 철거업체가
+   * 실사에서 줄자로 재는 값과 같은 종류라 — 사진 눈대중이나 원단위 어림보다 신뢰도가 높다.
+   * 이름·길이·폭이 모두 온전한 방만 인정하고, 나머지는 조용히 걸러 낸다.
+   */
+  function parseRooms(body: Record<string, unknown>): RoomMeasurement[] | undefined {
+    if (!Array.isArray(body.rooms)) return undefined;
+    const rooms = body.rooms
+      .filter((r): r is Record<string, unknown> => typeof r === 'object' && r !== null)
+      .map((r) => ({
+        name: typeof r.name === 'string' && r.name.trim() ? r.name.trim() : '공간',
+        lengthM: Number(r.lengthM),
+        widthM: Number(r.widthM),
+      }))
+      .filter(
+        (r) =>
+          Number.isFinite(r.lengthM) && r.lengthM > 0 && Number.isFinite(r.widthM) && r.widthM > 0,
+      );
+    return rooms.length > 0 ? rooms : undefined;
   }
 
   /**
@@ -257,13 +282,16 @@ export function createSiteAnalysisRouter(
     });
   }
 
-  // POST /api/site-analysis/analyze  { imageBase64, mimeType?, note? }
+  // POST /api/site-analysis/analyze  { imageBase64, mimeType?, note?, rooms? }
   router.post('/site-analysis/analyze', async (req, res) => {
     const body = (req.body ?? {}) as Record<string, unknown>;
     const input = parseInput(body);
+    const rooms = parseRooms(body);
+    // 방 실측이 있으면 그게 사용자 입력 연면적보다 더 정확한 힌트다 — 덮어쓴다.
+    const groundedInput = rooms ? { ...input, totalFloorAreaM2: sumRoomAreaM2(rooms) } : input;
     try {
       const register = await lookupRegister(body);
-      const analysis = await analyzeCached(withRegisterHints(input, register));
+      const analysis = await analyzeCached(withRegisterHints(groundedInput, register));
       res.json({ ...analysis, ...(register ? { buildingRegister: register } : {}) });
     } catch (err) {
       if (err instanceof SiteAnalysisValidationError) {
@@ -275,13 +303,17 @@ export function createSiteAnalysisRouter(
   });
 
   // POST /api/site-analysis/waste-items
-  //   { imageBase64|images, mimeType?, note?, floorAreaM2?, floors?, structure? }
+  //   { imageBase64|images, mimeType?, note?, floorAreaM2?, floors?, structure?,
+  //     rooms?: [{ name, lengthM, widthM }] }
   //  사진 → 소재 식별(SiteAnalyzer) + 면적 기반 물량 추정(VolumeEstimator) →
   //  요청서 소재별 항목(wasteItems)으로 자동 변환.
   //
   //  추정 결과(estimate)를 그대로 함께 돌려준다. 예전에는 총 중량만 뽑아 쓰고
   //  트럭 대수·추정 범위·신뢰도를 버렸는데, 현장에서 견적을 잡을 때 정작 필요한 건
   //  "몇 톤이고 트럭 몇 대냐" 라서 클라이언트가 쓸 수 있게 내보낸다.
+  //
+  //  rooms(방 단위 실측)를 주면 부분 철거(인테리어 등)에서 건축물대장의 건물 전체
+  //  연면적보다 정확한 대상 범위로 물량을 잡는다 — estimate.method 가 ROOM_MEASUREMENT.
   router.post('/site-analysis/waste-items', async (req, res) => {
     const body = (req.body ?? {}) as Record<string, unknown>;
     const input = parseInput(body);
@@ -295,13 +327,20 @@ export function createSiteAnalysisRouter(
       body.structure === 'RC' || body.structure === 'BRICK' || body.structure === 'WOOD'
         ? body.structure
         : undefined;
+    const rooms = parseRooms(body);
+    const roomsAreaM2 = rooms ? sumRoomAreaM2(rooms) : undefined;
+    // 방 실측이 있으면 그게 사용자 입력 연면적보다 더 정확한 힌트다 — 덮어쓴다.
+    const groundedInput =
+      roomsAreaM2 !== undefined ? { ...input, totalFloorAreaM2: roomsAreaM2 } : input;
     try {
       const register = await lookupRegister(body);
-      const analysis = await analyzeCached(withRegisterHints(input, register));
+      const analysis = await analyzeCached(withRegisterHints(groundedInput, register));
 
-      // 대장 값이 사용자가 적어낸 값보다 정확하다 — 연면적은 이미 전체 면적이므로 층수를 곱하지 않는다.
-      const area = register?.totalFloorAreaM2 ?? floorAreaM2;
-      const effFloors = register?.totalFloorAreaM2 !== undefined ? undefined : floors;
+      // 우선순위: 방 실측(대상 범위를 직접 잰 값) > 건축물대장(건물 전체) > 사용자 입력.
+      // 실측·대장 값은 이미 전체 면적이므로 층수를 곱하지 않는다.
+      const area = roomsAreaM2 ?? register?.totalFloorAreaM2 ?? floorAreaM2;
+      const effFloors =
+        roomsAreaM2 !== undefined || register?.totalFloorAreaM2 !== undefined ? undefined : floors;
       const effStructure = register?.structure ?? structure;
 
       let totalKg: number | undefined;
@@ -312,6 +351,7 @@ export function createSiteAnalysisRouter(
             floorAreaM2: area,
             floors: effFloors,
             structure: effStructure,
+            measured: roomsAreaM2 !== undefined,
           });
           totalKg = estimate.estimatedTons * 1000;
         } catch {
@@ -324,6 +364,8 @@ export function createSiteAnalysisRouter(
         wasteItems: siteAnalysisToWasteItems(analysis.materials, totalKg),
         ...(estimate ? { estimate } : {}),
         ...(cost ? { cost } : {}),
+        // 방 실측을 무엇으로 계산했는지 그대로 돌려준다 — 철거업체가 견적서에서 검산할 수 있게.
+        ...(rooms ? { rooms, roomsAreaM2 } : {}),
         ...(register ? { buildingRegister: register } : {}),
       });
     } catch (err) {
@@ -387,7 +429,9 @@ export function createSiteAnalysisRouter(
     const lng = Number(req.query.lng);
     const found = await parcel.lookup(lat, lng);
     if (!found) {
-      res.status(404).json({ error: '해당 위치의 지번을 찾지 못했습니다. 건물 위를 다시 찍어 주세요.' });
+      res
+        .status(404)
+        .json({ error: '해당 위치의 지번을 찾지 못했습니다. 건물 위를 다시 찍어 주세요.' });
       return;
     }
     res.json(found);

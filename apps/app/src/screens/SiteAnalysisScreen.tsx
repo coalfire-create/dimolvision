@@ -18,11 +18,13 @@ import {
   WASTE_CLASS_LABELS,
   m2ToPyeong,
   pyeongToM2,
+  sumRoomAreaM2,
   type BuildingStructure,
   formatWonShort,
   type CostEstimate,
   type CostLine,
   type DetectedMaterial,
+  type RoomMeasurement,
   type SiteAnalysis,
   type SiteQuoteBasis,
   type VolumeEstimate,
@@ -73,7 +75,11 @@ function AnalysisProgress() {
   }, []);
   const stage = [...ANALYSIS_STAGES].reverse().find((s) => elapsed >= s.at) ?? ANALYSIS_STAGES[0]!;
   return (
-    <View style={styles.progressCard} accessibilityRole="progressbar" accessibilityLabel={stage.label}>
+    <View
+      style={styles.progressCard}
+      accessibilityRole="progressbar"
+      accessibilityLabel={stage.label}
+    >
       <ActivityIndicator color={theme.colors.primary} />
       <View style={{ flex: 1 }}>
         <Text style={styles.progressLabel}>{stage.label}</Text>
@@ -155,7 +161,6 @@ function formatWeight(kg: number): string {
   return `${Math.round(kg).toLocaleString('ko-KR')}kg`;
 }
 
-
 interface PickedImage {
   base64: string;
   mimeType: string;
@@ -182,7 +187,8 @@ function readParcelFromUrl(): PickedParcel | null {
   const sigunguCd = q.get('sigunguCd') ?? '';
   const bjdongCd = q.get('bjdongCd') ?? '';
   if (!/^\d{5}$/.test(sigunguCd) || !/^\d{5}$/.test(bjdongCd)) return null;
-  const pad = (v: string | null) => (/^\d{1,4}$/.test(v ?? '') ? (v as string).padStart(4, '0') : '0000');
+  const pad = (v: string | null) =>
+    /^\d{1,4}$/.test(v ?? '') ? (v as string).padStart(4, '0') : '0000';
   return {
     sigunguCd,
     bjdongCd,
@@ -235,6 +241,14 @@ export function SiteAnalysisScreen() {
   /** 선택 입력 — 연면적(평)과 주구조. 넣으면 물량 추정이 붙는다. */
   const [pyeong, setPyeong] = useState('');
   const [structure, setStructure] = useState<BuildingStructure | null>(null);
+  /**
+   * 방 단위 실측(부분 철거용). 건물 전체가 아니라 일부만 철거할 때는 건축물대장 연면적도
+   * 위 연면적 입력도 대상 범위와 다르다 — 줄자로 잰 방 목록이 있으면 그게 우선이다.
+   */
+  const [roomsMode, setRoomsMode] = useState(false);
+  const [rooms, setRooms] = useState<Array<{ name: string; length: string; width: string }>>([
+    { name: '', length: '', width: '' },
+  ]);
   /** 건축년도(사용승인). 2009년 석면 사용 금지 이전이면 AI 가 석면 의심을 가중한다. */
   const [buildYear, setBuildYear] = useState('');
   const [estimate, setEstimate] = useState<VolumeEstimate | null>(null);
@@ -255,7 +269,6 @@ export function SiteAnalysisScreen() {
     const area = readAreaFromUrl();
     if (area !== undefined) setPyeong(String(m2ToPyeong(area)));
   }, []);
-
 
   function applyAssets(assets: ImagePicker.ImagePickerAsset[]) {
     const picked = assets
@@ -305,6 +318,35 @@ export function SiteAnalysisScreen() {
     return Number.isFinite(v) && v > 0 ? pyeongToM2(v) : undefined;
   }
 
+  /** 입력 행 중 이름·길이·폭이 모두 채워진 방만 실측값으로 인정한다. */
+  function roomMeasurements(): RoomMeasurement[] {
+    return rooms
+      .map((r) => ({
+        name: r.name.trim() || '공간',
+        lengthM: Number(r.length),
+        widthM: Number(r.width),
+      }))
+      .filter(
+        (r) =>
+          Number.isFinite(r.lengthM) && r.lengthM > 0 && Number.isFinite(r.widthM) && r.widthM > 0,
+      );
+  }
+
+  function addRoomRow() {
+    setRooms((prev) => [...prev, { name: '', length: '', width: '' }]);
+  }
+
+  function removeRoomRow(index: number) {
+    setRooms((prev) => (prev.length <= 1 ? prev : prev.filter((_, i) => i !== index)));
+  }
+
+  function updateRoomRow(
+    index: number,
+    patch: Partial<{ name: string; length: string; width: string }>,
+  ) {
+    setRooms((prev) => prev.map((r, i) => (i === index ? { ...r, ...patch } : r)));
+  }
+
   /**
    * 사진만 있으면 소재·공정만, 연면적까지 있으면 물량 추정(톤·트럭 대수)까지 한 번에.
    * 면적은 선택 입력이라 없어도 체험이 막히지 않는다.
@@ -318,6 +360,8 @@ export function SiteAnalysisScreen() {
 
   async function runAnalysis(shots: PickedImage[]) {
     const payload = shots.map((i) => ({ imageBase64: i.base64, mimeType: i.mimeType }));
+    // 방 실측이 있으면 그게 연면적 입력보다 정확한 대상 범위다(부분 철거일 때 특히).
+    const roomsInput = roomsMode ? roomMeasurements() : [];
     const area = floorAreaM2();
     const year = buildingYear();
     // 지도에서 주소를 찍었으면 지번 코드를 함께 보낸다 — 서버가 대장을 조회해 힌트를 채운다.
@@ -329,9 +373,9 @@ export function SiteAnalysisScreen() {
           ji: parcel.ji,
         }
       : {};
-    if (area === undefined) {
+    if (roomsInput.length === 0 && area === undefined) {
       setEstimate(null);
-      // 연면적이 없으면 물량 총량을 모른다 → 금액을 낼 근거가 없으므로 지운다.
+      // 대상 범위(연면적/방 실측)가 없으면 물량 총량을 모른다 → 금액을 낼 근거가 없으므로 지운다.
       setCost(null);
       const r = await analyzeSite({
         images: payload,
@@ -344,7 +388,7 @@ export function SiteAnalysisScreen() {
     }
     const r = await analyzeSiteWasteItems({
       images: payload,
-      floorAreaM2: area,
+      ...(roomsInput.length > 0 ? { rooms: roomsInput } : { floorAreaM2: area }),
       ...addr,
       ...(structure ? { structure } : {}),
       ...(year ? { buildingYear: year } : {}),
@@ -413,9 +457,7 @@ export function SiteAnalysisScreen() {
               </View>
               <Text style={styles.heroEngineTag}>다중 모델 폴백 구조</Text>
             </View>
-            <Text style={styles.heroCardTitle}>
-              현장 사진으로{'\n'}소재·공정·물량을 분석합니다
-            </Text>
+            <Text style={styles.heroCardTitle}>현장 사진으로{'\n'}소재·공정·물량을 분석합니다</Text>
             <View style={styles.heroChipsRow}>
               <View style={styles.heroChip}>
                 <AppIcon name="alert" size={13} color="#93C5FD" />
@@ -432,9 +474,7 @@ export function SiteAnalysisScreen() {
             </View>
             <View style={styles.noLoginRow}>
               <AppIcon name="check" size={14} color="#34D399" />
-              <Text style={styles.noLoginText}>
-                회원가입·로그인 없이 모든 기능 이용
-              </Text>
+              <Text style={styles.noLoginText}>회원가입·로그인 없이 모든 기능 이용</Text>
             </View>
           </View>
         </FadeInUp>
@@ -524,8 +564,8 @@ export function SiteAnalysisScreen() {
 
             {images.length < MAX_PHOTOS ? (
               <Text style={styles.addMoreHint}>
-                각도를 달리해 촬영할수록 식별 정확도가 올라갑니다. 전경 · 벽/바닥 근접 · 지붕 · 위험 부위
-                (최대 {MAX_PHOTOS}장)
+                각도를 달리해 촬영할수록 식별 정확도가 올라갑니다. 전경 · 벽/바닥 근접 · 지붕 · 위험
+                부위 (최대 {MAX_PHOTOS}장)
               </Text>
             ) : null}
           </FadeInUp>
@@ -549,7 +589,11 @@ export function SiteAnalysisScreen() {
         {/* 촬영 & 앨범 버튼 액션 카드로 리디자인 */}
         <FadeInUp delay={120}>
           <View style={styles.pickRow}>
-            <PressableScale style={styles.actionCard} onPress={takePhoto} accessibilityRole="button">
+            <PressableScale
+              style={styles.actionCard}
+              onPress={takePhoto}
+              accessibilityRole="button"
+            >
               <View style={styles.actionIconCircle}>
                 <AppIcon name="camera" size={26} color={theme.colors.primary} />
               </View>
@@ -558,10 +602,14 @@ export function SiteAnalysisScreen() {
               </Text>
               <Text style={styles.actionCardSub}>가이드 따라 여러 장</Text>
             </PressableScale>
-            
+
             <View style={{ width: theme.spacing.sm }} />
 
-            <PressableScale style={styles.actionCard} onPress={pickFromLibrary} accessibilityRole="button">
+            <PressableScale
+              style={styles.actionCard}
+              onPress={pickFromLibrary}
+              accessibilityRole="button"
+            >
               <View style={styles.actionIconCircle}>
                 <AppIcon name="document" size={26} color={theme.colors.primary} />
               </View>
@@ -589,7 +637,8 @@ export function SiteAnalysisScreen() {
               </>
             ) : (
               <Text style={styles.addrSub}>
-                지도에서 건물을 찍으면 건축물대장의 주구조·연면적·사용승인연도를 불러와 분석에 반영합니다.
+                지도에서 건물을 찍으면 건축물대장의 주구조·연면적·사용승인연도를 불러와 분석에
+                반영합니다.
               </Text>
             )}
             {register ? (
@@ -677,6 +726,81 @@ export function SiteAnalysisScreen() {
                   );
                 })}
               </View>
+
+              <PressableScale
+                style={styles.roomsToggle}
+                onPress={() => setRoomsMode((v) => !v)}
+                accessibilityRole="button"
+                accessibilityState={{ selected: roomsMode }}
+              >
+                <Text style={styles.roomsToggleText}>
+                  {roomsMode
+                    ? '✓ 방 단위 실측 사용 중'
+                    : '부분 철거인가요? 방 단위로 직접 재서 입력'}
+                </Text>
+              </PressableScale>
+
+              {roomsMode ? (
+                <View style={styles.roomsBox}>
+                  <Text style={styles.roomsHint}>
+                    철거할 공간만 이름·가로·세로(m)로 입력하세요. 건물 전체 연면적보다 실제 대상
+                    범위를 정확히 반영해 물량·금액 추정이 정밀해집니다.
+                  </Text>
+                  {rooms.map((r, i) => (
+                    <View key={i} style={styles.roomRow}>
+                      <TextInput
+                        style={[styles.roomInput, styles.roomInputName]}
+                        value={r.name}
+                        onChangeText={(v) => updateRoomRow(i, { name: v })}
+                        placeholder={`공간 ${i + 1}`}
+                        placeholderTextColor={theme.colors.textMuted}
+                        accessibilityLabel={`방 ${i + 1} 이름`}
+                      />
+                      <TextInput
+                        style={[styles.roomInput, styles.roomInputNum]}
+                        value={r.length}
+                        onChangeText={(v) => updateRoomRow(i, { length: v })}
+                        keyboardType="numeric"
+                        inputMode="numeric"
+                        placeholder="가로m"
+                        placeholderTextColor={theme.colors.textMuted}
+                        accessibilityLabel={`방 ${i + 1} 가로(m)`}
+                      />
+                      <TextInput
+                        style={[styles.roomInput, styles.roomInputNum]}
+                        value={r.width}
+                        onChangeText={(v) => updateRoomRow(i, { width: v })}
+                        keyboardType="numeric"
+                        inputMode="numeric"
+                        placeholder="세로m"
+                        placeholderTextColor={theme.colors.textMuted}
+                        accessibilityLabel={`방 ${i + 1} 세로(m)`}
+                      />
+                      <PressableScale
+                        style={styles.roomRemoveBtn}
+                        onPress={() => removeRoomRow(i)}
+                        accessibilityRole="button"
+                        accessibilityLabel={`방 ${i + 1} 삭제`}
+                      >
+                        <Text style={styles.roomRemoveText}>×</Text>
+                      </PressableScale>
+                    </View>
+                  ))}
+                  <PressableScale
+                    style={styles.roomAddBtn}
+                    onPress={addRoomRow}
+                    accessibilityRole="button"
+                  >
+                    <Text style={styles.roomAddText}>+ 공간 추가</Text>
+                  </PressableScale>
+                  {sumRoomAreaM2(roomMeasurements()) > 0 ? (
+                    <Text style={styles.roomTotal}>
+                      실측 합계 {sumRoomAreaM2(roomMeasurements())}㎡ (
+                      {m2ToPyeong(sumRoomAreaM2(roomMeasurements()))}평)
+                    </Text>
+                  ) : null}
+                </View>
+              ) : null}
             </View>
           </FadeInUp>
         ) : null}
@@ -767,7 +891,8 @@ function MaterialRow({ m, maxKg }: { m: DetectedMaterial; maxKg: number }) {
         </View>
       ) : null}
       <Text style={styles.materialMeta}>
-        {MATERIAL_CATEGORY_LABELS[m.category]} · 신뢰도 {CONFIDENCE_LABELS[m.confidence] ?? m.confidence}
+        {MATERIAL_CATEGORY_LABELS[m.category]} · 신뢰도{' '}
+        {CONFIDENCE_LABELS[m.confidence] ?? m.confidence}
         {m.note ? ` · ${m.note}` : ''}
       </Text>
     </View>
@@ -832,14 +957,19 @@ function buildPrintableHtml(
   const quoteBlock = q
     ? `
 <h2>견적 기초자료</h2>
-${q.wasteByClass.length ? `<table><thead><tr><th>법정 분류</th><th>예상 배출량</th><th>배출 방식</th><th>비고</th></tr></thead><tbody>
+${
+  q.wasteByClass.length
+    ? `<table><thead><tr><th>법정 분류</th><th>예상 배출량</th><th>배출 방식</th><th>비고</th></tr></thead><tbody>
 ${q.wasteByClass
   .map(
-    (w) => `<tr><td>${e(WASTE_CLASS_LABELS[w.wasteClass])}</td><td class="num">${e(formatWeight(w.estimatedKg))}</td><td>${w.separable ? '분리 가능' : '혼합 배출'}</td><td>${e(w.note ?? '')}</td></tr>`,
+    (w) =>
+      `<tr><td>${e(WASTE_CLASS_LABELS[w.wasteClass])}</td><td class="num">${e(formatWeight(w.estimatedKg))}</td><td>${w.separable ? '분리 가능' : '혼합 배출'}</td><td>${e(w.note ?? '')}</td></tr>`,
   )
   .join('')}
 <tr><th>합계</th><th class="num">${e(formatWeight(q.wasteByClass.reduce((a, w) => a + w.estimatedKg, 0)))}</th><th colspan="2"></th></tr>
-</tbody></table>` : ''}
+</tbody></table>`
+    : ''
+}
 ${q.estimatedWorkDays || q.estimatedCrewSize ? `<p><b>예상 공기</b> ${q.estimatedWorkDays ?? '-'}일 · <b>예상 인원</b> ${q.estimatedCrewSize ?? '-'}명</p>` : ''}
 ${q.equipment.length ? `<h2>투입 장비</h2><ul>${q.equipment.map((x) => `<li><b>${e(x.name)}</b>${x.spec ? ` (${e(x.spec)})` : ''}${x.reason ? ` — ${e(x.reason)}` : ''}</li>`).join('')}</ul>` : ''}
 ${q.siteChecklist.length ? `<div class="box chk"><h2>현장 실사에서 반드시 확인</h2><p class="sub">사진으로 확인할 수 없는 항목입니다. 견적 오차가 여기서 생깁니다.</p><ul>${q.siteChecklist.map((c) => `<li>${e(c)}</li>`).join('')}</ul></div>` : ''}
@@ -854,7 +984,8 @@ ${q.costDrivers.length ? `<h2>단가 좌우 요인</h2><ul>${q.costDrivers.map((
 <table><thead><tr><th>항목</th><th>하한</th><th>상한</th><th>산출 근거</th></tr></thead><tbody>
 ${cost.lines
   .map(
-    (l) => `<tr><td>${e(l.label)}</td><td class="num">${e(formatWonShort(l.minWon))}</td>` +
+    (l) =>
+      `<tr><td>${e(l.label)}</td><td class="num">${e(formatWonShort(l.minWon))}</td>` +
       `<td class="num">${e(formatWonShort(l.maxWon))}</td>` +
       `<td class="src">${l.detail.map((d) => e(d)).join('<br>')}` +
       `${l.source ? `<br><i>${e(l.source.agency)} · ${e(l.source.title)} (${e(l.source.effective)})</i>` : ''}</td></tr>`,
@@ -965,7 +1096,11 @@ function ShareReportButton({
       >
         <AppIcon name="document" size={16} color={theme.colors.primary} />
         <Text style={styles.shareBtnText}>
-          {copied ? '리포트가 복사되었습니다' : Platform.OS === 'web' ? '리포트 복사' : '리포트 공유'}
+          {copied
+            ? '리포트가 복사되었습니다'
+            : Platform.OS === 'web'
+              ? '리포트 복사'
+              : '리포트 공유'}
         </Text>
       </PressableScale>
 
@@ -1016,9 +1151,7 @@ function QuoteBasisSection({ quote }: { quote: SiteQuoteBasis }) {
               </View>
             </View>
           ))}
-          {totalKg > 0 ? (
-            <Text style={styles.qbTotal}>합계 {formatWeight(totalKg)}</Text>
-          ) : null}
+          {totalKg > 0 ? <Text style={styles.qbTotal}>합계 {formatWeight(totalKg)}</Text> : null}
         </Card>
       ) : null}
 
@@ -1046,7 +1179,7 @@ function QuoteBasisSection({ quote }: { quote: SiteQuoteBasis }) {
             <View key={`${e.name}-${i}`} style={styles.qbEquip}>
               <Text style={styles.qbEquipName}>
                 {e.name}
-                {e.spec ? <Text style={styles.qbEquipSpec}>  {e.spec}</Text> : null}
+                {e.spec ? <Text style={styles.qbEquipSpec}> {e.spec}</Text> : null}
               </Text>
               {e.reason ? <Text style={styles.qbRowNote}>{e.reason}</Text> : null}
             </View>
@@ -1091,7 +1224,11 @@ function VolumeEstimateCard({ estimate }: { estimate: VolumeEstimate }) {
     <View style={styles.estimateCard}>
       <View style={styles.estimateHead}>
         <AppIcon name="recycle" size={18} color={theme.colors.primary} />
-        <Text style={styles.estimateTitle}>연면적 기반 물량 추정</Text>
+        <Text style={styles.estimateTitle}>
+          {estimate.method === 'ROOM_MEASUREMENT'
+            ? '방 실측 기반 물량 추정'
+            : '연면적 기반 물량 추정'}
+        </Text>
         <View style={styles.estimateConfChip}>
           <Text style={styles.estimateConfText}>
             신뢰도 {CONFIDENCE_LABELS[estimate.confidence] ?? estimate.confidence}
@@ -1101,7 +1238,8 @@ function VolumeEstimateCard({ estimate }: { estimate: VolumeEstimate }) {
 
       <Text style={styles.estimateHero}>{estimate.estimatedTons}톤</Text>
       <Text style={styles.estimateRange}>
-        예상 범위 {estimate.rangeMinTons}~{estimate.rangeMaxTons}톤 · 연면적{' '}
+        예상 범위 {estimate.rangeMinTons}~{estimate.rangeMaxTons}톤 ·{' '}
+        {estimate.method === 'ROOM_MEASUREMENT' ? '실측 면적' : '연면적'}{' '}
         {Math.round(estimate.floorAreaM2).toLocaleString('ko-KR')}㎡
       </Text>
 
@@ -1149,8 +1287,8 @@ function CostEstimateCard({ cost }: { cost: CostEstimate }) {
           `부가세 ${formatWonShort(cost.vatMinWon)}~${formatWonShort(cost.vatMaxWon)}`}
       </Text>
       <Text style={styles.costWhyRange}>
-        폭이 넓은 이유는 분리배출 성공 여부입니다. 현장에서 분리하면 하한에, 혼합으로 나가면
-        상한에 가까워집니다.
+        폭이 넓은 이유는 분리배출 성공 여부입니다. 현장에서 분리하면 하한에, 혼합으로 나가면 상한에
+        가까워집니다.
       </Text>
 
       {cost.lines.map((l) => (
@@ -1321,7 +1459,14 @@ function AnalysisResult({
       {result.hazards.length > 0 ? (
         <FadeInUp>
           <View style={styles.hazardCard}>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: spacing.xs }}>
+            <View
+              style={{
+                flexDirection: 'row',
+                alignItems: 'center',
+                gap: 6,
+                marginBottom: spacing.xs,
+              }}
+            >
               <AppIcon name="alert" size={20} color={colors.error} />
               <Text style={styles.hazardTitle}>안전 위험요소</Text>
             </View>
@@ -1353,7 +1498,7 @@ const styles = StyleSheet.create({
     maxWidth: CONTENT_MAX_WIDTH,
     alignSelf: 'center',
   },
-  
+
   /* 히어로 AI 카드 */
   heroCard: {
     backgroundColor: '#0F172A',
@@ -1691,6 +1836,42 @@ const styles = StyleSheet.create({
   structChipText: { color: colors.textMuted, fontSize: 13, fontWeight: '700' },
   structChipTextOn: { color: colors.primary },
 
+  /* 방 단위 실측(부분 철거) */
+  roomsToggle: { marginTop: spacing.sm, alignSelf: 'flex-start' },
+  roomsToggleText: { color: colors.primary, fontSize: 12.5, fontWeight: '700' },
+  roomsBox: {
+    marginTop: spacing.xs,
+    paddingTop: spacing.xs,
+    borderTopWidth: 1,
+    borderTopColor: colors.border,
+  },
+  roomsHint: { color: colors.textMuted, fontSize: 12, lineHeight: 17, marginBottom: spacing.xs },
+  roomRow: { flexDirection: 'row', gap: 6, marginBottom: 6, alignItems: 'center' },
+  roomInput: {
+    borderColor: colors.border,
+    borderWidth: 1.5,
+    borderRadius: radius.button,
+    paddingHorizontal: 10,
+    paddingVertical: 9,
+    fontSize: 13,
+    color: colors.text,
+    backgroundColor: colors.background,
+  },
+  roomInputName: { flex: 2 },
+  roomInputNum: { flex: 1 },
+  roomRemoveBtn: {
+    width: 28,
+    height: 28,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: radius.button,
+    backgroundColor: colors.primarySoft,
+  },
+  roomRemoveText: { color: colors.primary, fontSize: 16, fontWeight: '800', lineHeight: 16 },
+  roomAddBtn: { alignSelf: 'flex-start', marginTop: 2 },
+  roomAddText: { color: colors.primary, fontSize: 12.5, fontWeight: '700' },
+  roomTotal: { color: colors.text, fontSize: 13, fontWeight: '700', marginTop: spacing.xs },
+
   /* 물량 추정 결과 카드 */
   /* 금액 견적 */
   costCard: {
@@ -1893,7 +2074,13 @@ const styles = StyleSheet.create({
     marginTop: spacing.xs,
   },
   checklistTitle: { color: '#B45309', fontSize: font.body, fontWeight: '800' },
-  checklistSub: { color: '#92400E', fontSize: 12, lineHeight: 18, marginTop: 4, marginBottom: spacing.xs },
+  checklistSub: {
+    color: '#92400E',
+    fontSize: 12,
+    lineHeight: 18,
+    marginTop: 4,
+    marginBottom: spacing.xs,
+  },
   checklistItem: { color: '#78350F', fontSize: 13, lineHeight: 21, marginTop: 2 },
 
   /* 결과 요약 수치 타일 */
